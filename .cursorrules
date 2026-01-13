@@ -64,7 +64,11 @@ Reports are saved to: ~/Downloads/
 ### 1. AI-Powered Detection (Primary System)
 - **ALL detection uses OpenAI Vision API** (no hardcoded methods)
 - Send camera frames to OpenAI every second (configurable via DETECTION_FPS)
-- Vision API returns: person_present, phone_visible, distraction_type
+- Vision API returns: person_present, phone_visible (ACTIVE usage only), distraction_type
+- **Phone detection is smart**: Detects based on attention + screen state (not position)
+  - Requires: Person looking at phone AND screen is ON
+  - Position irrelevant: Phone can be on desk or in hands
+- **Prevents false positives**: Phone on desk with person looking elsewhere = NOT detected
 - NO fallback methods - AI is the only detection method
 
 ### 2. Privacy & Data

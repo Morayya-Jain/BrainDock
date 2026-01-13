@@ -1,14 +1,17 @@
 # Gavin AI
 
-A local AI-powered study session tracker that monitors student presence and phone usage via webcam, logs events, and generates PDF reports with OpenAI-powered insights.
+A local AI-powered study session tracker that monitors student presence and **active phone usage** via webcam, logs events, and generates PDF reports with OpenAI-powered insights.
 
 ## Features
 
-- **Webcam Monitoring**: Tracks student presence and detects potential phone usage
+- **AI-Powered Detection**: Uses OpenAI Vision API to detect person presence and active phone usage
+- **Smart Phone Detection**: Detects phone usage based on attention + screen state (not physical position)
+  - ✅ Detects: Person looking at phone + screen ON (whether on desk or in hands)
+  - ❌ Ignores: Phone on desk but person looking elsewhere, or screen OFF
 - **Session Analytics**: Computes focused time, away time, and phone usage statistics
-- **AI-Powered Insights**: Uses OpenAI to generate friendly summaries and suggestions
+- **AI-Generated Insights**: OpenAI GPT provides personalized summaries and suggestions
 - **PDF Reports**: Professional reports with statistics and AI-generated insights
-- **Privacy-First**: All video processing happens locally; only statistics sent to OpenAI
+- **Privacy-Conscious**: Camera frames analyzed by OpenAI (30-day retention), no local video storage
 
 ## Requirements
 
@@ -104,10 +107,30 @@ Edit `config.py` to customize:
 
 ## Privacy & Data
 
-- **Video Processing**: All video analysis happens locally on your device
-- **Data Sent to OpenAI**: Only anonymized statistics (durations, event counts)
-- **Data Storage**: Session data stored locally as JSON files
-- **No Cloud Storage**: All data remains on your computer
+### What Gets Analyzed
+- **Camera frames** sent to OpenAI Vision API every 1 second
+- OpenAI retains images for 30 days (abuse monitoring), then automatically deletes them
+- No video or images stored locally on your device
+
+### Phone Detection Privacy
+- System detects **active phone usage** based on two factors:
+  1. **Attention**: Is the person looking at the phone?
+  2. **Screen State**: Is the phone screen ON?
+- **Position doesn't matter**: Phone can be on desk or in hands
+- **Examples:**
+  - ✅ Phone on desk + looking down at it + screen on = Detected
+  - ❌ Phone on desk + looking at computer = NOT detected
+  - ❌ Phone anywhere + screen off/face-down = NOT detected
+
+### Data Storage
+- **Session data**: Stored locally as JSON (timestamps and event types only)
+- **Reports**: PDF files saved to your Downloads folder
+- **No video recordings**: Camera frames are never saved to disk
+
+### OpenAI Data Usage
+- Vision API: Camera frames (for real-time detection)
+- GPT API: Session statistics only (no images)
+- All data processed per OpenAI's privacy policy
 
 ## Future Enhancements
 

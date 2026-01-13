@@ -50,6 +50,6 @@ EVENT_AWAY = "away"
 EVENT_PHONE_SUSPECTED = "phone_suspected"
 
 # Logging
-LOG_LEVEL = "INFO"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # Can override in .env: DEBUG, INFO, WARNING, ERROR
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 

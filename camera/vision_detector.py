@@ -16,13 +16,16 @@ class VisionDetector:
     """
     Uses OpenAI Vision API (GPT-4o/GPT-4o-mini with vision) to detect:
     - Person presence
-    - Active phone usage (held, looked at, screen on - not just lying on desk)
+    - Active phone usage (attention + screen on - position doesn't matter)
     - Other distractions
     
     Much more accurate than hardcoded rules!
     
-    Important: Phone detection only triggers when the phone is being ACTIVELY USED.
-    A phone lying on desk, face-down, or with screen off will NOT be detected.
+    Important: Phone detection only triggers when BOTH conditions are met:
+    1. Person's attention/gaze is directed AT the phone
+    2. Phone screen is ON (visible light/colors)
+    
+    Position (on desk vs. in hands) doesn't matter - it's about attention and screen state.
     """
     
     def __init__(self, api_key: Optional[str] = None, vision_model: str = "gpt-4o-mini"):
@@ -81,16 +84,19 @@ class VisionDetector:
             Dictionary with detection results:
             {
                 "person_present": bool,
-                "phone_visible": bool (ACTIVE usage only - held, looked at, screen on),
+                "phone_visible": bool (attention + screen on, position irrelevant),
                 "phone_confidence": float (0-1),
                 "distraction_type": str or None,
                 "description": str
             }
         
         Note:
-            phone_visible only returns True if person is ACTIVELY using the phone
-            (holding it, looking at it, screen on). A phone lying on desk will NOT
-            be counted as phone usage.
+            phone_visible only returns True when BOTH conditions are met:
+            1. Person's attention/gaze is directed AT the phone
+            2. Phone screen is ON (showing light/colors)
+            
+            Position doesn't matter - phone can be on desk or in hands.
+            What matters is attention + screen state.
         """
         # Check cache
         current_time = time.time()
@@ -116,16 +122,26 @@ Analyze the image and return this exact JSON format:
   "description": "brief description of what you see"
 }
 
-CRITICAL RULES for phone detection:
-- ONLY set phone_visible to true if the person is ACTIVELY USING the phone:
-  * Phone is being HELD in their hands (not just lying on desk)
-  * Person is LOOKING AT the phone screen (not away from it)
-  * Phone screen appears to be ON (not off/black)
-- DO NOT detect as phone usage if:
-  * Phone is lying on desk/table (not being held)
-  * Phone is face-down or screen is off/black
-  * Phone is visible but person is not looking at it
-  * Phone is in pocket/bag
+CRITICAL RULES for phone detection - ONLY set phone_visible to true if BOTH conditions are met:
+1. Phone screen appears to be ON (showing light/colors, not black/off/face-down)
+2. Person's eyes/attention is directed AT the phone (looking at it, engaged with it)
+
+IMPORTANT: Phone can be on desk OR in hands - position doesn't matter. What matters is:
+- Is the person LOOKING at it? (eyes/gaze directed at phone)
+- Is the screen ON and usable? (not off/black/face-down)
+
+DO NOT detect as phone usage if:
+- Person's eyes/attention is directed ELSEWHERE (not looking at phone)
+- Phone screen is OFF, black, or face-down (even if person is near it)
+- Phone is visible but person is clearly focused on something else (computer, book, etc.)
+- Phone is in pocket/bag
+
+Examples:
+✓ Phone on desk + person looking down at it + screen glowing = DETECT
+✓ Phone in hands + person looking at screen + screen on = DETECT
+✗ Phone on desk + person looking at computer screen = DO NOT DETECT
+✗ Phone on desk + screen is black/off = DO NOT DETECT
+✗ Phone face-down on desk = DO NOT DETECT
 
 Other rules:
 - Set person_present to true if you see a person's face or body
@@ -238,12 +254,18 @@ Respond with ONLY the JSON object, nothing else."""
         """
         Detect if phone is being ACTIVELY USED (not just visible).
         
-        Active usage means:
-        - Phone is held in hands
-        - Person is looking at the phone
-        - Screen appears to be on
+        Active usage requires BOTH:
+        1. Person's attention/gaze directed AT the phone
+        2. Phone screen is ON (showing light/colors)
         
-        A phone lying on desk or face-down will NOT count as usage.
+        Position irrelevant - phone can be:
+        - On desk (if person looking down at it with screen on)
+        - In hands (if person looking at it with screen on)
+        
+        Will NOT count as usage:
+        - Phone on desk but person looking at computer/elsewhere
+        - Phone screen OFF or face-down (even if person nearby)
+        - Phone visible but not being actively engaged with
         
         Args:
             frame: BGR image from camera

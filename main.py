@@ -30,6 +30,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress noisy third-party library logs (HTTP requests, etc.)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+
 
 class GavinAI:
     """
@@ -87,6 +93,8 @@ class GavinAI:
         print("\n📚 Press Enter to start your study session...")
         try:
             input()
+            # Small delay to ensure input buffer is clear before starting session
+            time.sleep(0.2)
         except KeyboardInterrupt:
             print("\n\n👋 Goodbye!")
             sys.exit(0)
@@ -98,6 +106,18 @@ class GavinAI:
         self.session = Session()
         self.session.start()
         self.running = True
+        
+        # Small delay to ensure previous input is cleared
+        time.sleep(0.3)
+        
+        # Flush any pending input
+        import sys
+        if sys.stdin.isatty():
+            try:
+                import termios
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+            except:
+                pass  # Not available on all platforms
         
         # Start keyboard listener in separate thread
         stop_event = threading.Event()
@@ -169,10 +189,14 @@ class GavinAI:
         try:
             # Wait for Enter or 'q'
             user_input = input()
-            stop_event.set()
-            self.should_stop = True
-        except:
+            if not stop_event.is_set():  # Only stop if not already stopped
+                stop_event.set()
+                self.should_stop = True
+        except (EOFError, OSError):
+            # Handle input errors gracefully
             pass
+        except Exception as e:
+            logger.debug(f"Keyboard listener error: {e}")
     
     def end_session(self):
         """End the session and generate report."""

@@ -183,6 +183,52 @@ self.detection_cache_duration = 2.0  # Cache for 2 seconds instead of 1
 
 ---
 
+## 🎯 Phone Detection: Active Usage Only
+
+### Important Distinction
+
+The system is designed to detect **active phone usage** based on two key factors:
+
+**Detection Criteria (BOTH required):**
+1. **Attention**: Person's eyes/gaze directed AT the phone
+2. **Screen State**: Phone screen is ON (showing light/colors)
+
+**Position is IRRELEVANT** - phone can be anywhere!
+
+**✅ WILL Detect (Active Usage):**
+- Phone on desk + person looking down at it + screen ON
+- Phone in hands + person looking at screen + screen ON
+- Phone on lap + person looking at it + screen ON
+- Any scenario where attention + active screen are present
+
+**❌ Will NOT Detect (Passive Presence):**
+- Phone on desk + person looking at computer/book
+- Phone anywhere + screen OFF or black
+- Phone face-down on any surface
+- Phone in pocket/bag
+- Phone visible but person's attention elsewhere
+
+### Why This Matters
+
+**Problem Solved:**
+- Students often have phones on their desks while studying
+- A phone lying with screen off shouldn't count as a distraction
+- A phone on desk while student works on computer shouldn't count
+- Only active engagement (attention + screen) is a true distraction
+
+**Key Insight:**
+- **Position doesn't matter** (desk vs. hands vs. lap)
+- **What matters:** Where is the person looking? Is the screen on?
+
+**Implementation:**
+The Vision API prompt explicitly instructs the AI to check:
+1. **Attention**: Is person's gaze directed at the phone? ✓
+2. **Screen state**: Is the screen ON and usable? ✓
+
+This dramatically reduces false positives and accurately tracks real phone distractions!
+
+---
+
 ## 📊 What Gets Detected Now
 
 The Vision API analyzes each frame for:
@@ -193,9 +239,11 @@ The Vision API analyzes each frame for:
    - Are they facing the camera?
 
 2. **Phone Usage**
-   - Is a smartphone/mobile phone visible?
+   - Is a smartphone/mobile phone being ACTIVELY USED?
+   - Is person's attention/gaze directed AT the phone?
+   - Is phone screen ON (showing light/colors)?
+   - Position doesn't matter (can be on desk or in hands)
    - What's the confidence level?
-   - Where is it positioned?
 
 3. **Distractions** (Extensible!)
    - Other devices (tablet, second phone)
@@ -220,11 +268,24 @@ prompt = """Analyze this webcam frame for a student focus tracking system.
 Return a JSON object with these fields:
 {
   "person_present": true/false,
-  "phone_visible": true/false,
+  "phone_visible": true/false (ONLY if actively being used),
   "phone_confidence": 0.0-1.0,
   "distraction_type": "phone" or "none" or other type,
   "description": "Brief description"
 }
+
+CRITICAL: Only detect phone_visible=true if BOTH conditions are met:
+1. Person's attention/gaze is directed AT the phone
+2. Phone screen is ON (showing light/colors)
+
+Position doesn't matter - phone can be on desk, in hands, on lap, etc.
+What matters is: Is person looking at it? Is screen on?
+
+Examples:
+✓ Phone on desk + person looking down at it + screen glowing = DETECT
+✓ Phone in hands + person looking at screen + screen on = DETECT
+✗ Phone on desk + person looking at computer = DO NOT DETECT
+✗ Phone anywhere + screen OFF/black = DO NOT DETECT
 """
 ```
 

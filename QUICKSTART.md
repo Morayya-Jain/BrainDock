@@ -58,7 +58,10 @@ Session ended. Duration: 45m
 - **Lighting:** Ensure good lighting on your face
 - **Position:** Sit facing the camera
 - **Distance:** Stay within 1-2 meters of the camera
-- **Privacy:** All video processing is local - nothing is uploaded!
+- **Phone Detection:** System detects usage based on attention + screen state
+  - ✅ Looking at phone + screen ON = Detected (regardless of position)
+  - ❌ Phone on desk but looking at computer = Not detected
+- **False Positives:** Phone position doesn't matter - it's about where you're looking
 
 ## Need Help?
 

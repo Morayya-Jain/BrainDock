@@ -85,10 +85,35 @@ Then handle new fields in your code!
 ## 📊 What AI Detects
 
 ✅ **Person Present:** Any human visible in frame  
-✅ **Phone Visible:** Smartphone/mobile phone  
+✅ **Phone ACTIVELY BEING USED:** Based on attention + screen state (not position)  
 ✅ **Phone Confidence:** How sure (0-100%)  
 ✅ **Distraction Type:** What kind of distraction  
 ✅ **Description:** Brief summary of scene  
+
+### IMPORTANT: Active Phone Usage Detection
+
+The system detects **active phone usage** based on TWO factors:
+
+**Detection Criteria (BOTH required):**
+1. **Attention**: Person's eyes/gaze directed AT the phone
+2. **Screen State**: Phone screen is ON (showing light/colors)
+
+**Position is IRRELEVANT:**
+- Phone can be on desk OR in hands
+- What matters is attention + screen state
+
+**✅ WILL Detect:**
+- Phone on desk + person looking down at it + screen ON
+- Phone in hands + person looking at screen + screen ON
+- Any position where person is engaged with an active screen
+
+**❌ Will NOT Detect:**
+- Phone on desk + person looking at computer/elsewhere (no attention)
+- Phone anywhere + screen OFF or face-down (no active screen)
+- Phone in pocket/bag
+- Phone visible but person clearly focused on something else
+
+This prevents false positives while catching all real phone usage!
 
 Can add:
 - Tablets
