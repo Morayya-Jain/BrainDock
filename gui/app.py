@@ -348,6 +348,12 @@ class GavinGUI:
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        
+        # Bring window to front on launch (no special permissions needed)
+        self.root.lift()
+        self.root.attributes('-topmost', True)
+        self.root.after(100, lambda: self.root.attributes('-topmost', False))
+        self.root.focus_force()
     
     def _create_fonts(self):
         """Create custom fonts for the UI with fixed sizes."""
