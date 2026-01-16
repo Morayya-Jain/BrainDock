@@ -20,7 +20,8 @@ from reportlab.platypus import (
     PageBreak,
     Frame,
     PageTemplate,
-    Image
+    Image,
+    Flowable
 )
 from io import BytesIO
 from PIL import Image as PILImage, ImageDraw, ImageFont
@@ -638,6 +639,153 @@ def _create_gauge_with_legend(focus_pct: float) -> Table:
     return table
 
 
+class RoundedBoxFlowable(Flowable):
+    """
+    A flowable that wraps content in a rounded rectangle container.
+    
+    Draws a rounded rectangle background/border and places content inside.
+    """
+    
+    def __init__(
+        self,
+        content: list,
+        width: float,
+        bg_color: str = '#F4F8FB',
+        border_color: str = '#D0DDE8',
+        border_width: float = 1.5,
+        corner_radius: int = 15,
+        padding: int = 20,
+        padding_top: int = None,
+        padding_bottom: int = None
+    ):
+        """
+        Initialize rounded box flowable.
+        
+        Args:
+            content: List of flowables to render inside the box
+            width: Width of the container
+            bg_color: Background color (hex)
+            border_color: Border color (hex)
+            border_width: Border stroke width
+            corner_radius: Radius of rounded corners
+            padding: Internal padding (used for left/right, and as default for top/bottom)
+            padding_top: Top padding (overrides padding if set)
+            padding_bottom: Bottom padding (overrides padding if set)
+        """
+        Flowable.__init__(self)
+        self.content = content
+        self.box_width = width
+        self.bg_color = colors.HexColor(bg_color)
+        self.border_color = colors.HexColor(border_color)
+        self.border_width = border_width
+        self.corner_radius = corner_radius
+        self.padding = padding
+        self.padding_top = padding_top if padding_top is not None else padding
+        self.padding_bottom = padding_bottom if padding_bottom is not None else padding
+        self._content_height = 0
+    
+    def wrap(self, available_width, available_height):
+        """
+        Calculate the size of this flowable.
+        
+        Args:
+            available_width: Maximum available width
+            available_height: Maximum available height
+            
+        Returns:
+            Tuple of (width, height) needed for this flowable
+        """
+        # Calculate total content height
+        self._content_height = 0
+        for item in self.content:
+            w, h = item.wrap(self.box_width - 2 * self.padding, available_height)
+            self._content_height += h
+        
+        # Total height includes top and bottom padding
+        total_height = self._content_height + self.padding_top + self.padding_bottom
+        
+        self.width = self.box_width
+        self.height = total_height
+        
+        return (self.width, self.height)
+    
+    def draw(self):
+        """
+        Draw the rounded box and its content.
+        """
+        canvas = self.canv
+        
+        # Draw the rounded rectangle background
+        canvas.saveState()
+        canvas.setFillColor(self.bg_color)
+        canvas.setStrokeColor(self.border_color)
+        canvas.setLineWidth(self.border_width)
+        canvas.roundRect(
+            0, 0,
+            self.box_width, self.height,
+            self.corner_radius,
+            fill=1, stroke=1
+        )
+        canvas.restoreState()
+        
+        # Draw content from top to bottom
+        y_position = self.height - self.padding_top
+        
+        for item in self.content:
+            # Get the item's dimensions
+            w, h = item.wrap(self.box_width - 2 * self.padding, self.height)
+            
+            # Move down by the item's height
+            y_position -= h
+            
+            # Draw the item
+            item.drawOn(canvas, self.padding, y_position)
+
+
+def _create_focus_card(focus_pct: float) -> RoundedBoxFlowable:
+    """
+    Create a rounded card containing the focus gauge, legend, statement, and emoji.
+    
+    Groups all focus visualization elements into a visually cohesive container
+    with rounded corners, background, and border styling.
+    
+    Args:
+        focus_pct: Focus percentage (0-100)
+        
+    Returns:
+        RoundedBoxFlowable containing all focus elements in a styled card
+    """
+    # Create the individual components
+    gauge_with_legend = _create_gauge_with_legend(focus_pct)
+    focus_statement = _create_focus_statement_paragraph(focus_pct)
+    focus_emoji = _create_focus_emoji_image(focus_pct)
+    
+    # Build content list
+    content = [
+        gauge_with_legend,
+        Spacer(1, 0.2 * inch),
+        focus_statement,
+    ]
+    
+    # Add emoji if available
+    if focus_emoji:
+        content.append(focus_emoji)
+    
+    # Create the rounded box container
+    card = RoundedBoxFlowable(
+        content=content,
+        width=6.2 * inch,
+        bg_color='#F4F8FB',      # Light blue-gray background
+        border_color='#D0DDE8',  # Subtle border
+        border_width=1.5,
+        corner_radius=15,
+        padding=20,
+        padding_bottom=8         # Reduced bottom padding for tighter fit with emoji
+    )
+    
+    return card
+
+
 def generate_report(
     stats: Dict[str, Any],
     session_id: str,
@@ -817,21 +965,17 @@ def generate_report(
     
     story.append(stats_table)
     
-    # Add focus gauge visualization with legend below the statistics table
-    # Extra spacer to position the entire focus component (gauge, legend, statement, emoji) lower
-    story.append(Spacer(1, 1.1 * inch))
-    gauge_with_legend = _create_gauge_with_legend(focus_pct)
-    story.append(gauge_with_legend)
+    # Add focus visualization card (gauge, legend, statement, emoji in a rounded container)
+    story.append(Spacer(1, 0.8 * inch))
+    focus_card = _create_focus_card(focus_pct)
     
-    # Add focus feedback statement with colored category word
-    story.append(Spacer(1, 0.3 * inch))
-    focus_statement = _create_focus_statement_paragraph(focus_pct)
-    story.append(focus_statement)
-    
-    # Add focus emoji below the statement (only if emoji font is available)
-    focus_emoji = _create_focus_emoji_image(focus_pct)
-    if focus_emoji:
-        story.append(focus_emoji)
+    # Center the focus card using a wrapper table
+    centered_card = Table([[focus_card]], colWidths=[6.2 * inch])
+    centered_card.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (0, 0), 'CENTER'),
+        ('VALIGN', (0, 0), (0, 0), 'MIDDLE'),
+    ]))
+    story.append(centered_card)
     
     # ===== PAGE 2+: Session Logs =====
     
