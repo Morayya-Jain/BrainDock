@@ -2,8 +2,8 @@
 """
 Gavin AI - Main Entry Point
 
-A local AI-powered study session tracker that monitors student presence
-and phone usage via webcam, logs events, and generates PDF reports with
+A local AI-powered focus tracker that monitors presence and phone usage
+via webcam, logs events, and generates PDF reports with
 OpenAI-powered insights.
 
 Usage:
@@ -26,8 +26,7 @@ from camera.capture import CameraCapture
 from camera.vision_detector import VisionDetector
 from tracking.session import Session
 from tracking.analytics import compute_statistics
-from ai.summariser import SessionSummariser
-from reporting.pdf_report import generate_full_report
+from reporting.pdf_report import generate_report
 
 # Configure logging
 logging.basicConfig(
@@ -73,7 +72,6 @@ class GavinAI:
         else:
             print("✓ OpenAI API key found")
             print(f"✓ Using vision model: {config.OPENAI_VISION_MODEL}")
-            print(f"✓ Using text model: {config.OPENAI_MODEL}")
         
         # Check camera availability
         print("✓ Camera access ready")
@@ -83,7 +81,7 @@ class GavinAI:
     def display_welcome(self):
         """Display welcome message and instructions."""
         print("\n" + "=" * 60)
-        print("🎯 Gavin AI - AI-Powered Study Assistant")
+        print("🎯 Gavin AI - AI-Powered Focus Assistant")
         print("=" * 60)
         print("\nThis app will:")
         print("  • Monitor your presence via OpenAI Vision API")
@@ -96,7 +94,7 @@ class GavinAI:
     
     def wait_for_start(self):
         """Wait for user to press Enter to start the session."""
-        print("\n📚 Press Enter to start your study session...")
+        print("\n📚 Press Enter to start your focus session...")
         try:
             input()
             # Small delay to ensure input buffer is clear before starting session
@@ -107,7 +105,7 @@ class GavinAI:
     
     def run_session(self):
         """
-        Run the main study session with camera monitoring.
+        Run the main focus session with camera monitoring.
         """
         self.session = Session()
         self.session.start()
@@ -134,7 +132,7 @@ class GavinAI:
         )
         keyboard_thread.start()
         
-        print("\n💡 Monitoring your study session...")
+        print("\n💡 Monitoring your focus session...")
         print("   Press Enter or 'q' to end the session\n")
         
         try:
@@ -223,55 +221,41 @@ class GavinAI:
             self.session.get_duration()
         )
         
-        # Generate AI summary
-        print("🤖 Generating AI insights...")
-        summariser = SessionSummariser()
-        summary_data = summariser.generate_summary(stats)
-        
-        if summary_data["success"]:
-            print("✓ AI summary generated")
-        else:
-            print("⚠️  Using fallback summary (OpenAI unavailable)")
-        
         # Save session data
         print("💾 Saving session data...")
         session_file = self.session.save()
         print(f"   Session saved: {session_file}")
         
-        # Generate PDF reports (summary + logs)
-        print("📄 Generating PDF reports...")
+        # Generate PDF report (summary + logs combined)
+        print("📄 Generating PDF report...")
         try:
-            summary_path, logs_path = generate_full_report(
+            report_path = generate_report(
                 stats,
-                summary_data,
                 self.session.session_id,
                 self.session.start_time,
                 self.session.end_time
             )
-            print(f"✓ Summary report saved: {summary_path}")
-            print(f"✓ Detailed logs saved: {logs_path}")
+            print(f"✓ Report saved: {report_path}")
         except Exception as e:
             logger.error(f"Failed to generate PDF: {e}")
             print(f"❌ PDF generation failed: {e}")
             return
         
         # Display summary
-        self._display_summary(stats, summary_data)
+        self._display_summary(stats)
         
-        print(f"\n📂 Your reports are ready:")
-        print(f"   Summary: {summary_path}")
-        print(f"   Logs: {logs_path}")
+        print(f"\n📂 Your report is ready:")
+        print(f"   {report_path}")
         print("\n" + "=" * 60)
         print("✨ Session complete! Keep up the great work!")
         print("=" * 60 + "\n")
     
-    def _display_summary(self, stats: dict, summary_data: dict):
+    def _display_summary(self, stats: dict):
         """
         Display session summary in the console.
         
         Args:
             stats: Statistics dictionary
-            summary_data: AI summary data
         """
         print("\n" + "=" * 60)
         print("📈 Session Summary")
@@ -324,7 +308,7 @@ def main():
     Default mode is GUI unless --cli is specified.
     """
     parser = argparse.ArgumentParser(
-        description="Gavin AI - AI-Powered Study Focus Tracker",
+        description="Gavin AI - AI-Powered Focus Tracker",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

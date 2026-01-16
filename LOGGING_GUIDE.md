@@ -47,7 +47,7 @@ LOG_LEVEL=INFO
 ### With WARNING level (cleaner)
 ```
 ✓ Session started at 10:30 AM
-💡 Monitoring your study session...
+💡 Monitoring your focus session...
 📱 Phone usage detected (10:30 AM)
 Session ended. Duration: 30s
 ```

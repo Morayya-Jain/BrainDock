@@ -12,10 +12,7 @@ BASE_DIR = Path(__file__).parent
 
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = "gpt-4o-mini"  # For text summaries
 OPENAI_VISION_MODEL = "gpt-4o-mini"  # For image analysis (person/phone detection)
-OPENAI_MAX_RETRIES = 3
-OPENAI_RETRY_DELAY = 1  # seconds
 
 # Vision API settings
 VISION_DETECTION_INTERVAL = 1.0  # Analyze frames every N seconds (to save costs)

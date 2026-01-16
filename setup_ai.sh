@@ -81,7 +81,7 @@ if summariser.client:
     print('')
     print('Next steps:')
     print('  • Run: python3 main.py')
-    print('  • Complete a study session')
+    print('  • Complete a focus session')
     print('  • Get AI-powered insights in your report!')
 else:
     print('❌ Failed to initialize OpenAI client')

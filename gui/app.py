@@ -2,7 +2,7 @@
 Gavin AI - Desktop GUI Application
 
 A minimal tkinter GUI that wraps the existing detection code,
-providing a user-friendly interface for study session tracking.
+providing a user-friendly interface for focus session tracking.
 """
 
 import tkinter as tk
@@ -26,8 +26,7 @@ from camera.vision_detector import VisionDetector
 from camera import get_event_type
 from tracking.session import Session
 from tracking.analytics import compute_statistics
-from ai.summariser import SessionSummariser
-from reporting.pdf_report import generate_full_report
+from reporting.pdf_report import generate_report
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +290,7 @@ class RoundedButton(tk.Canvas):
 
 class GavinGUI:
     """
-    Main GUI application for Gavin AI study tracker.
+    Main GUI application for Gavin AI focus tracker.
     
     Provides a clean, scalable interface with:
     - Start/Stop session button
@@ -473,7 +472,7 @@ class GavinGUI:
         
         self.subtitle_label = tk.Label(
             title_frame,
-            text="Study Focus Tracker",
+            text="Focus Tracker",
             font=self.font_small,
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_dark"]
@@ -576,7 +575,7 @@ class GavinGUI:
     
     def _show_privacy_notice(self):
         """Display the privacy notice popup."""
-        privacy_text = """Gavin AI uses OpenAI's Vision API to monitor your study sessions.
+        privacy_text = """Gavin AI uses OpenAI's Vision API to monitor your focus sessions.
 
 How it works:
 • Camera frames are sent to OpenAI for analysis
@@ -613,7 +612,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
             self._stop_session()
     
     def _start_session(self):
-        """Start a new study session."""
+        """Start a new focus session."""
         # Verify API key exists
         if not config.OPENAI_API_KEY:
             messagebox.showerror(
@@ -785,17 +784,12 @@ By clicking 'I Understand', you acknowledge this data processing."""
                 self.session.get_duration()
             )
             
-            # Generate AI summary
-            summariser = SessionSummariser()
-            summary_data = summariser.generate_summary(stats)
-            
             # Save session
             self.session.save()
             
-            # Generate PDF
-            summary_path, logs_path = generate_full_report(
+            # Generate PDF (combined summary + logs)
+            report_path = generate_report(
                 stats,
-                summary_data,
                 self.session.session_id,
                 self.session.start_time,
                 self.session.end_time
@@ -808,20 +802,19 @@ By clicking 'I Understand', you acknowledge this data processing."""
             # Show success and offer to open report
             result = messagebox.askyesno(
                 "Report Generated",
-                f"Reports saved to:\n\n"
-                f"Summary: {summary_path.name}\n"
-                f"Logs: {logs_path.name}\n\n"
-                f"Location: {summary_path.parent}\n\n"
-                "Would you like to open the summary report?"
+                f"Report saved to:\n\n"
+                f"{report_path.name}\n\n"
+                f"Location: {report_path.parent}\n\n"
+                "Would you like to open the report?"
             )
             
             if result:
-                self._open_file(summary_path)
+                self._open_file(report_path)
             
             # Reset status after showing dialog
             self._update_status("idle", "Ready to Start")
             
-            logger.info(f"Report generated: {summary_path}")
+            logger.info(f"Report generated: {report_path}")
             
         except Exception as e:
             logger.error(f"Report generation failed: {e}")

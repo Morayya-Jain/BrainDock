@@ -82,7 +82,7 @@ def _add_header(canvas_obj, doc):
     width, height = letter
     
     # Add "GAVIN AI" text logo in top right
-    canvas_obj.setFont('Times-Bold', 14)
+    canvas_obj.setFont('Times-Bold', 11)
     canvas_obj.setFillColor(colors.HexColor('#4A90E2'))
     canvas_obj.drawRightString(width - 50, height - 40, "GAVIN AI")
     
@@ -151,18 +151,19 @@ def _format_time(minutes: float) -> str:
 
 def generate_report(
     stats: Dict[str, Any],
-    summary_data: Dict[str, Any],
     session_id: str,
     start_time: datetime,
     end_time: Optional[datetime] = None,
     output_dir: Optional[Path] = None
 ) -> Path:
     """
-    Generate a PDF report from session statistics and AI summary.
+    Generate a combined PDF report with summary statistics and all session logs.
+    
+    Page 1: Title, metadata, Summary Statistics table
+    Page 2+: Full session logs (all events, no truncation)
     
     Args:
         stats: Statistics dictionary from analytics.compute_statistics()
-        summary_data: Summary and suggestions from AI summariser
         session_id: Unique session identifier
         start_time: Session start time
         end_time: Session end time (optional)
@@ -181,22 +182,18 @@ def generate_report(
     filepath = output_dir / filename
     
     # Create PDF document with custom template
-    # Reduced topMargin so continuation pages don't have large gaps
     doc = SimpleDocTemplate(
         str(filepath),
         pagesize=letter,
         rightMargin=60,
         leftMargin=60,
-        topMargin=60,  # Reduced from 80 to 60 for better continuation
+        topMargin=60,
         bottomMargin=60
     )
     
     # Build the story (content)
     story = []
     styles = getSampleStyleSheet()
-    
-    # Define Georgia font (Times-Roman is similar and built-in to ReportLab)
-    # Georgia isn't built-in, but Times-Roman is elegant and serif like Georgia
     
     # Custom styles with Georgia-like font (Times-Roman)
     title_style = ParagraphStyle(
@@ -206,7 +203,7 @@ def generate_report(
         fontSize=28,
         textColor=colors.HexColor('#2C3E50'),
         spaceAfter=20,
-        spaceBefore=20,  # Added space for first page to account for reduced topMargin
+        spaceBefore=20,
         alignment=TA_LEFT,
         leading=34
     )
@@ -227,36 +224,35 @@ def generate_report(
         fontName='Times-Bold',
         fontSize=18,
         textColor=colors.HexColor('#34495E'),
-        spaceAfter=15,
+        spaceAfter=20,
         spaceBefore=20,
         alignment=TA_LEFT,
-        leading=22
+        leading=24
     )
     
     body_style = ParagraphStyle(
         'CustomBody',
         parent=styles['Normal'],
         fontName='Times-Roman',
-        fontSize=12.5,  # Increased from 12 to 12.5
+        fontSize=12,
         textColor=colors.HexColor('#2C3E50'),
-        leading=18,  # Adjusted leading proportionally
-        spaceAfter=8,
-        alignment=TA_JUSTIFY  # Justified text alignment
+        leading=17,
+        spaceAfter=8
     )
     
-    # Title - clean and elegant without emoji
-    story.append(Paragraph("Study Session Report", title_style))
+    # ===== PAGE 1: Title + Summary Statistics =====
+    
+    # Title
+    story.append(Paragraph("Focus Session Report", title_style))
     
     # Session metadata as subtitle with date and time range
     date_str = start_time.strftime("%B %d, %Y")
     start_time_str = start_time.strftime("%I:%M%p").lstrip('0').replace(' ', '')
     
-    # Build time range string - always show "from X - Y" format
     if end_time:
         end_time_str = end_time.strftime("%I:%M%p").lstrip('0').replace(' ', '')
         metadata = f"{date_str} from {start_time_str} - {end_time_str}"
     else:
-        # If no end time, use start time for both (session still in progress)
         metadata = f"{date_str} from {start_time_str} - {start_time_str}"
     
     story.append(Paragraph(metadata, subtitle_style))
@@ -264,18 +260,15 @@ def generate_report(
     # Statistics section
     story.append(Paragraph("Summary Statistics", heading_style))
     
-    # Create statistics table with modern, clean design
     # Calculate focus percentage (present time / total time)
-    # Note: Phone time is separate from present time, not subtracted from it
     focus_pct = (stats['present_minutes'] / stats['total_minutes'] * 100) if stats['total_minutes'] > 0 else 0
-    # Format percentage without .0 decimal
     focus_pct_str = f"{int(focus_pct)}%" if focus_pct == int(focus_pct) else f"{focus_pct:.1f}%"
     
     # Build table data, only including rows with non-zero values
     stats_data = [['Category', 'Duration']]
     
     # Track which rows we add for color coding later
-    row_types = []  # Will store 'present', 'away', 'phone', 'total', 'focus'
+    row_types = []
     
     # Add rows conditionally based on non-zero values
     if stats['present_minutes'] > 0:
@@ -334,151 +327,15 @@ def generate_report(
     stats_table.setStyle(TableStyle(table_style))
     
     story.append(stats_table)
-    story.append(Spacer(0.5, 1.0 * inch))  # More space before Session Summary to fill page
     
-    # Session Summary section - on page 1 (fills remaining space)
-    story.append(Paragraph("Session Summary", heading_style))
+    # ===== PAGE 2+: Session Logs =====
     
-    summary_text = summary_data.get('summary', 'No summary available.')
-    story.append(Paragraph(summary_text, body_style))
-    
-    # Force Key Takeaways to start on second page
+    # Force logs to start on second page
     story.append(PageBreak())
-    story.append(Spacer(1, 0.1 * inch))  # Small spacing at top of page 2
+    story.append(Spacer(1, 0.1 * inch))
     
-    # Key Takeaways section - on page 2
-    heading_style_keepwithnext = ParagraphStyle(
-        'HeadingKeepWithNext',
-        parent=heading_style,
-        keepWithNext=True  # Prevents heading from separating from content
-    )
-    
-    story.append(Paragraph("Key Takeaways", heading_style_keepwithnext))
-    
-    suggestions = summary_data.get('suggestions', [])
-    if suggestions:
-        for i, suggestion in enumerate(suggestions, 1):
-            bullet_text = f"<b>{i}.</b> {suggestion}"
-            story.append(Paragraph(bullet_text, body_style))
-            story.append(Spacer(1, 0.12 * inch))
-    else:
-        story.append(Paragraph("No suggestions available.", body_style))
-    
-    story.append(Spacer(1, 0.5 * inch))
-    
-    # Footer - elegant and minimal
-    footer_style = ParagraphStyle(
-        'Footer',
-        parent=styles['Normal'],
-        fontName='Times-Italic',
-        fontSize=9,
-        textColor=colors.HexColor('#95A5A6'),
-        alignment=TA_CENTER
-    )
-    
-    footer_text = "Generated by Gavin AI"
-    story.append(Paragraph(footer_text, footer_style))
-    
-    # Build PDF with custom page template
-    try:
-        doc.build(story, onFirstPage=_create_first_page_template, onLaterPages=_create_later_page_template)
-        logger.info(f"PDF report generated: {filepath}")
-        return filepath
-    except Exception as e:
-        logger.error(f"Error generating PDF: {e}")
-        raise
-
-
-def generate_logs_report(
-    stats: Dict[str, Any],
-    session_id: str,
-    start_time: datetime,
-    end_time: Optional[datetime] = None,
-    output_dir: Optional[Path] = None
-) -> Path:
-    """
-    Generate a PDF report containing the full session timeline logs.
-    
-    Args:
-        stats: Statistics dictionary from analytics.compute_statistics()
-        session_id: Unique session identifier
-        start_time: Session start time
-        end_time: Session end time (optional)
-        output_dir: Output directory (defaults to config.REPORTS_DIR)
-        
-    Returns:
-        Path to the generated PDF file
-    """
-    if output_dir is None:
-        output_dir = config.REPORTS_DIR
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate filename with logs suffix
-    filename = f"{session_id} logs.pdf"
-    filepath = output_dir / filename
-    
-    # Create PDF document with custom template
-    doc = SimpleDocTemplate(
-        str(filepath),
-        pagesize=letter,
-        rightMargin=60,
-        leftMargin=60,
-        topMargin=60,
-        bottomMargin=60
-    )
-    
-    # Build the story (content)
-    story = []
-    styles = getSampleStyleSheet()
-    
-    # Custom styles
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontName='Times-Bold',
-        fontSize=28,
-        textColor=colors.HexColor('#2C3E50'),
-        spaceAfter=20,
-        spaceBefore=20,
-        alignment=TA_LEFT,
-        leading=34
-    )
-    
-    subtitle_style = ParagraphStyle(
-        'Subtitle',
-        parent=styles['Normal'],
-        fontName='Times-Italic',
-        fontSize=12,
-        textColor=colors.HexColor('#7F8C8D'),
-        spaceAfter=30,
-        alignment=TA_LEFT
-    )
-    
-    body_style = ParagraphStyle(
-        'CustomBody',
-        parent=styles['Normal'],
-        fontName='Times-Roman',
-        fontSize=12,
-        textColor=colors.HexColor('#2C3E50'),
-        leading=17,
-        spaceAfter=8
-    )
-    
-    # Title
-    story.append(Paragraph("Session Logs", title_style))
-    
-    # Session metadata as subtitle with date and time range
-    date_str = start_time.strftime("%B %d, %Y")
-    start_time_str = start_time.strftime("%I:%M%p").lstrip('0').replace(' ', '')
-    
-    if end_time:
-        end_time_str = end_time.strftime("%I:%M%p").lstrip('0').replace(' ', '')
-        metadata = f"{date_str} from {start_time_str} - {end_time_str}"
-    else:
-        metadata = f"{date_str} from {start_time_str} - {start_time_str}"
-    
-    story.append(Paragraph(metadata, subtitle_style))
+    # Logs heading
+    story.append(Paragraph("Session Logs", heading_style))
     
     # Get all events
     events = stats.get('events', [])
@@ -500,7 +357,7 @@ def generate_logs_report(
             timeline_table = Table(timeline_data, colWidths=[2.4 * inch, 2.2 * inch, 1.4 * inch])
             
             # Build table style
-            table_style = [
+            logs_table_style = [
                 # Header
                 ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#4A90E2')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -524,11 +381,11 @@ def generate_logs_report(
             for i, event in enumerate(non_zero_events, 1):
                 event_type = event.get('type', '')
                 if event_type == 'present':
-                    table_style.append(('TEXTCOLOR', (1, i), (1, i), colors.HexColor('#1B7A3D')))
+                    logs_table_style.append(('TEXTCOLOR', (1, i), (1, i), colors.HexColor('#1B7A3D')))
                 elif event_type in ['away', 'phone_suspected']:
-                    table_style.append(('TEXTCOLOR', (1, i), (1, i), colors.HexColor('#C62828')))
+                    logs_table_style.append(('TEXTCOLOR', (1, i), (1, i), colors.HexColor('#C62828')))
             
-            timeline_table.setStyle(TableStyle(table_style))
+            timeline_table.setStyle(TableStyle(logs_table_style))
             story.append(timeline_table)
         else:
             story.append(Paragraph("No events recorded.", body_style))
@@ -553,53 +410,8 @@ def generate_logs_report(
     # Build PDF with custom page template
     try:
         doc.build(story, onFirstPage=_create_first_page_template, onLaterPages=_create_later_page_template)
-        logger.info(f"PDF logs report generated: {filepath}")
+        logger.info(f"PDF report generated: {filepath}")
         return filepath
     except Exception as e:
-        logger.error(f"Error generating PDF logs: {e}")
+        logger.error(f"Error generating PDF: {e}")
         raise
-
-
-def generate_full_report(
-    stats: Dict[str, Any],
-    summary_data: Dict[str, Any],
-    session_id: str,
-    start_time: datetime,
-    end_time: Optional[datetime] = None,
-    output_dir: Optional[Path] = None
-) -> tuple:
-    """
-    Generate both the summary PDF and detailed logs PDF.
-    
-    Args:
-        stats: Statistics dictionary from analytics.compute_statistics()
-        summary_data: Summary and suggestions from AI summariser
-        session_id: Unique session identifier
-        start_time: Session start time
-        end_time: Session end time (optional)
-        output_dir: Output directory (defaults to config.REPORTS_DIR)
-        
-    Returns:
-        Tuple of (summary_path, logs_path)
-    """
-    # Generate summary report
-    summary_path = generate_report(
-        stats=stats,
-        summary_data=summary_data,
-        session_id=session_id,
-        start_time=start_time,
-        end_time=end_time,
-        output_dir=output_dir
-    )
-    
-    # Generate logs report
-    logs_path = generate_logs_report(
-        stats=stats,
-        session_id=session_id,
-        start_time=start_time,
-        end_time=end_time,
-        output_dir=output_dir
-    )
-    
-    return (summary_path, logs_path)
-

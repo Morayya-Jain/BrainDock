@@ -2,7 +2,7 @@
 
 ## 🤖 What AI Does in This App
 
-The app uses **OpenAI GPT-4o-mini** to analyze your study sessions and provide:
+The app uses **OpenAI GPT-4o-mini** to analyze your focus sessions and provide:
 
 1. **Friendly Summaries** - Natural language description of your session
 2. **Personalized Suggestions** - 3-5 actionable tips to improve focus
@@ -269,7 +269,7 @@ Edit `ai/summariser.py` line ~172 to customize the system prompt:
 
 ```python
 "role": "system",
-"content": "You are a supportive study coach who provides "
+"content": "You are a supportive focus coach who provides "
           "encouraging feedback and practical suggestions."
 ```
 

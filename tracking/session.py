@@ -9,7 +9,7 @@ import config
 
 class Session:
     """
-    Manages a single study session with event logging.
+    Manages a single focus session with event logging.
     
     Tracks session lifecycle, logs events (present, away, phone_suspected),
     and provides JSON serialization for persistence.

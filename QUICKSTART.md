@@ -39,7 +39,7 @@ python3 main.py
 Run with `python3 main.py --cli` for terminal-based tracking:
 
 1. Press **Enter** to start tracking
-2. Study while the app monitors via webcam
+2. Work while the app monitors via webcam
 3. Press **Enter** or **'q'** to end the session
 4. Get your PDF report with AI insights!
 
@@ -50,7 +50,7 @@ Run with `python3 main.py --cli` for terminal-based tracking:
 ```
 ┌────────────────────────────────────┐
 │          GAVIN AI                  │
-│      Study Focus Tracker           │
+│         Focus Tracker              │
 │                                    │
 │  ● Focused                         │
 │                                    │
@@ -67,13 +67,13 @@ Run with `python3 main.py --cli` for terminal-based tracking:
 ### CLI Mode
 
 ```
-🎯 Gavin AI - AI-Powered Study Assistant
+🎯 Gavin AI - AI-Powered Focus Assistant
 ================================================
 
-📚 Press Enter to start your study session...
+📚 Press Enter to start your focus session...
 
 ✓ Session started at 02:30 PM
-💡 Monitoring your study session...
+💡 Monitoring your focus session...
 
 ⚠ Moved away from desk (02:35 PM)
 ✓ Back at desk (02:37 PM)
@@ -112,5 +112,5 @@ Your PDF report includes:
 ✅ AI-generated insights  
 ✅ Personalized improvement suggestions  
 
-Happy studying! 🎯📚
+Stay focused! 🎯📚
 

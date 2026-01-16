@@ -217,9 +217,9 @@ The system is designed to detect **active phone usage** based on two key factors
 ### Why This Matters
 
 **Problem Solved:**
-- Students often have phones on their desks while studying
+- People often have phones on their desks while working
 - A phone lying with screen off shouldn't count as a distraction
-- A phone on desk while student works on computer shouldn't count
+- A phone on desk while user works on computer shouldn't count
 - Only active engagement (attention + screen) is a true distraction
 
 **Key Insight:**
@@ -269,7 +269,7 @@ Want to detect other things? Just modify the prompt!
 
 **Current prompt:**
 ```python
-prompt = """Analyze this webcam frame for a student focus tracking system.
+prompt = """Analyze this webcam frame for a focus tracking system.
 
 Return a JSON object with these fields:
 {
@@ -297,7 +297,7 @@ Examples:
 
 **Add more detection:**
 ```python
-prompt = """Analyze this webcam frame for a student focus tracking system.
+prompt = """Analyze this webcam frame for a focus tracking system.
 
 Return a JSON object with these fields:
 {
@@ -365,7 +365,7 @@ if result["phone_visible"]:
 ```json
 {
   "screen_visible": true/false,
-  "screen_content": "studying" or "social_media" or "games"
+  "screen_content": "working" or "social_media" or "games"
 }
 ```
 
@@ -491,7 +491,7 @@ VISION_DETECTION_INTERVAL = 3.0
 
 ```
 ✓ Session started at 09:30 PM
-💡 Monitoring your study session...
+💡 Monitoring your focus session...
 
 INFO: 📱 Phone detected by AI! Confidence: 0.85
 📱 Phone usage detected (09:32 PM)

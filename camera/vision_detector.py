@@ -109,7 +109,7 @@ class VisionDetector:
             base64_image = self._encode_frame(frame)
             
             # Create prompt - be very explicit about JSON format
-            prompt = """You are analyzing a webcam frame for a student focus tracking system.
+            prompt = """You are analyzing a webcam frame for a focus tracking system.
 
 You MUST respond with ONLY a valid JSON object (no other text before or after).
 

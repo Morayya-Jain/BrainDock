@@ -1,6 +1,6 @@
 # Gavin AI - Agent Quick Reference
 
-**TL;DR**: Python study tracker using OpenAI Vision API (1 FPS) to detect present/away/phone. Generates PDF reports. AI-only detection, no hardcoded methods.
+**TL;DR**: Python focus tracker using OpenAI Vision API (1 FPS) to detect present/away/phone. Generates PDF reports. AI-only detection, no hardcoded methods.
 
 ---
 
@@ -13,7 +13,6 @@
 | `camera/vision_detector.py` | Main detection logic (`analyze_frame()`) |
 | `tracking/analytics.py` | **Stats computation - MATH MUST ADD UP** |
 | `tracking/session.py` | Event logging, state changes |
-| `ai/summariser.py` | OpenAI GPT summaries |
 | `reporting/pdf_report.py` | PDF generation (~/Downloads/) |
 
 *Ignore: `detection.py`, `phone_detector.py` (legacy)*
@@ -31,9 +30,8 @@ NO hardcoded detection. OpenAI Vision API only. Cost: ~$0.06-0.12/min (intention
 **#3 - Time Format**  
 Use `_format_time()` → "1m 30s" not "1.5 minutes"
 
-**#4 - AI Tone**  
-Direct, factual. NO cheerleading.  
-❌ "Great job!" | ✅ "Focused 18 min (72%). 3 phone interruptions, avg 2 min."
+**#4 - PDF Output**  
+Single combined PDF: Page 1 = Summary Statistics table. Page 2+ = All session logs.
 
 ---
 
@@ -51,7 +49,6 @@ Direct, factual. NO cheerleading.
 DETECTION_FPS = 1                       # Don't increase (cost doubles)
 PHONE_CONFIDENCE_THRESHOLD = 0.5
 PHONE_DETECTION_DURATION_SECONDS = 2
-OPENAI_MODEL = "gpt-4o-mini"           # Summaries
 OPENAI_VISION_MODEL = "gpt-4o-mini"    # Detection
 ```
 
@@ -81,7 +78,6 @@ OPENAI_VISION_MODEL = "gpt-4o-mini"    # Detection
 - ❌ Fallback detection (AI-only by design)
 - ❌ Save frames to disk (privacy)
 - ❌ Increase API frequency (cost)
-- ❌ Cheerleading in summaries
 - ❌ Decimal minutes
 - ❌ Stats that don't sum
 

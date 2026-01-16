@@ -1,6 +1,6 @@
 # Gavin AI
 
-A local AI-powered study session tracker that monitors student presence and **active phone usage** via webcam, logs events, and generates PDF reports with OpenAI-powered insights.
+A local AI-powered focus tracker that monitors presence and **active phone usage** via webcam, logs events, and generates PDF reports.
 
 ## Features
 
@@ -10,11 +10,7 @@ A local AI-powered study session tracker that monitors student presence and **ac
   - ✅ Detects: Person looking at phone + screen ON (whether on desk or in hands)
   - ❌ Ignores: Phone on desk but person looking elsewhere, or screen OFF
 - **Session Analytics**: Computes focused time, away time, and phone usage statistics
-- **AI-Generated Insights**: OpenAI GPT provides detailed, personalized summaries and actionable takeaways
-  - 4-5 sentence summaries with behavior pattern analysis
-  - 5 specific, data-driven recommendations with time references
-  - Honest assessment of what worked and what needs improvement
-- **PDF Reports**: Professional reports with elegant gradient design, statistics, and AI-generated insights
+- **PDF Reports**: Professional combined PDF with summary statistics and full session logs
 - **Privacy-Conscious**: Camera frames analyzed by OpenAI (30-day retention), no local video storage
 
 ## Requirements
@@ -74,17 +70,15 @@ python main.py --cli
 4. Click "Generate Report" to create your PDF
 
 **CLI Mode:**
-1. Press Enter to start a study session
+1. Press Enter to start a focus session
 2. The app monitors your presence via webcam
 3. Events are logged (present, away, phone_suspected)
 4. Press 'q' or Enter to end the session
 5. A PDF report is automatically generated
 
 **Reports include:**
-- Session statistics (duration, focus rate, time breakdown)
-- Timeline of events (showing when you were focused/away/distracted)
-- **Detailed AI-generated summary**: 4-5 sentence analysis identifying behavior patterns
-- **5 specific takeaways**: Data-driven recommendations based on your actual session
+- Page 1: Session statistics (duration, focus rate, time breakdown)
+- Page 2+: Complete timeline of all events (showing when you were focused/away/distracted)
 
 ### Reports
 
@@ -119,8 +113,7 @@ gavin_ai/
 │   ├── __init__.py
 │   └── pdf_report.py         # PDF generation
 ├── ai/
-│   ├── __init__.py
-│   └── summariser.py         # OpenAI API integration
+│   └── __init__.py
 ├── data/
 │   └── sessions/             # Stored session JSON files
 └── tests/
@@ -162,7 +155,6 @@ Edit `config.py` to customize:
 
 ### OpenAI Data Usage
 - Vision API: Camera frames (for real-time detection)
-- GPT API: Session statistics only (no images)
 - All data processed per OpenAI's privacy policy
 
 ## Future Enhancements
