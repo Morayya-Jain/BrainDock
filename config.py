@@ -57,6 +57,22 @@ EVENT_PRESENT = "present"
 EVENT_AWAY = "away"
 EVENT_PHONE_SUSPECTED = "phone_suspected"
 
+# Unfocused alert settings
+# Alert plays at each of these thresholds (in seconds) when user is unfocused
+# After all alerts play, no more until user refocuses
+UNFOCUSED_ALERT_TIMES = [15, 60, 120]  # Escalating alerts: 15s, 1min, 2min
+
+# Supportive, non-condemning messages for each alert level
+# Each tuple: (badge_text, main_message)
+UNFOCUSED_ALERT_MESSAGES = [
+    ("Focus paused", "We noticed you stepped away!"),           # 15s - gentle notice
+    ("Quick check-in", "We are waiting for you :)"),       # 1min - reassuring
+    ("Reminder", "Don't forget to come back ;)"),  # 2min - supportive
+]
+
+# How long the alert popup stays visible (seconds)
+ALERT_POPUP_DURATION = 10
+
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # Can override in .env: DEBUG, INFO, WARNING, ERROR
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

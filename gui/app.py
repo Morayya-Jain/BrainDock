@@ -288,6 +288,329 @@ class RoundedButton(tk.Canvas):
         self._draw_button()
 
 
+class NotificationPopup:
+    """
+    A floating notification popup that appears on top of all windows.
+    
+    Shows supportive messages when the user is unfocused, with auto-dismiss
+    after a configurable duration and a manual close button.
+    """
+    
+    # Class-level reference to track active popup (only one at a time)
+    _active_popup: Optional['NotificationPopup'] = None
+    
+    # Consistent font family for the app
+    FONT_FAMILY = "SF Pro Display"
+    FONT_FAMILY_FALLBACK = "Helvetica Neue"
+    
+    def __init__(
+        self, 
+        parent: tk.Tk, 
+        badge_text: str,
+        message: str, 
+        duration_seconds: int = 10
+    ):
+        """
+        Initialize the notification popup.
+        
+        Args:
+            parent: Parent Tk root window
+            badge_text: The badge/pill text (e.g., "Focus paused")
+            message: The main message to display
+            duration_seconds: How long before auto-dismiss (default 10s)
+        """
+        # Dismiss any existing popup first
+        if NotificationPopup._active_popup is not None:
+            NotificationPopup._active_popup.dismiss()
+        
+        self.parent = parent
+        self.badge_text = badge_text
+        self.message = message
+        self.duration = duration_seconds
+        self._dismiss_after_id: Optional[str] = None
+        self._is_dismissed = False
+        
+        # Create the popup window
+        self.window = tk.Toplevel(parent)
+        self.window.overrideredirect(True)  # Borderless window
+        self.window.attributes('-topmost', True)  # Always on top
+        
+        # Popup dimensions (compact card)
+        self.popup_width = 280
+        self.popup_height = 200
+        
+        # On macOS, make the window background transparent for true rounded corners
+        if sys.platform == "darwin":
+            # Use transparent background
+            self.window.attributes('-transparent', True)
+            self.window.config(bg='systemTransparent')
+        
+        # Center on screen
+        screen_width = self.window.winfo_screenwidth()
+        screen_height = self.window.winfo_screenheight()
+        x = (screen_width - self.popup_width) // 2
+        y = (screen_height - self.popup_height) // 2
+        self.window.geometry(f"{self.popup_width}x{self.popup_height}+{x}+{y}")
+        
+        # Build the UI
+        self._create_ui()
+        
+        # Start auto-dismiss timer
+        self._start_dismiss_timer()
+        
+        # Register as active popup
+        NotificationPopup._active_popup = self
+        
+        # Aggressively bring notification to front (even when app is in background)
+        self._ensure_front()
+        
+        logger.debug(f"Notification popup shown: {badge_text} - {message}")
+    
+    def _ensure_front(self):
+        """Ensure the notification stays on top of all windows."""
+        if self._is_dismissed:
+            return
+        
+        # Lift and focus
+        self.window.lift()
+        self.window.attributes('-topmost', True)
+        
+        # On macOS, we need to be more aggressive
+        if sys.platform == "darwin":
+            self.window.focus_force()
+            # Schedule additional lifts to ensure visibility
+            self.parent.after(50, self._lift_again)
+            self.parent.after(150, self._lift_again)
+            self.parent.after(300, self._lift_again)
+    
+    def _lift_again(self):
+        """Lift the window again (called after delays)."""
+        if self._is_dismissed:
+            return
+        try:
+            self.window.lift()
+            self.window.attributes('-topmost', True)
+        except Exception:
+            pass
+    
+    def _get_font(self, size: int, weight: str = "normal") -> tuple:
+        """Get font tuple with fallback."""
+        return (self.FONT_FAMILY, size, weight)
+    
+    def _create_ui(self):
+        """Build the popup UI matching the reference design."""
+        # Colors matching the design exactly
+        bg_color = "#FFFFFF"           # White background
+        text_dark = "#1F2937"          # Dark text for message
+        text_muted = "#B0B8C1"         # Light gray for close button
+        accent_blue = "#818CF8"        # Blue color for GAVIN AI title (matching image)
+        badge_bg = "#F3F4F6"           # Light gray badge background
+        badge_border = "#E5E7EB"       # Badge border
+        badge_text_color = "#4B5563"   # Dark gray badge text
+        dot_color = "#D1D5DB"          # Very light gray dot (subtle)
+        corner_radius = 24             # Rounded corners
+        
+        # Transparent background for macOS, white for others
+        if sys.platform == "darwin":
+            canvas_bg = 'systemTransparent'
+        else:
+            canvas_bg = bg_color
+        
+        # Create canvas for the popup
+        self.canvas = tk.Canvas(
+            self.window,
+            width=self.popup_width,
+            height=self.popup_height,
+            bg=canvas_bg,
+            highlightthickness=0
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+        
+        # Draw main white background with rounded corners
+        self._draw_smooth_rounded_rect(
+            self.canvas,
+            0, 0,
+            self.popup_width, self.popup_height,
+            corner_radius,
+            fill=bg_color
+        )
+        
+        # "GAVIN AI" title
+        title_y = 32
+        title_x = 28
+        self.canvas.create_text(
+            title_x, title_y,
+            text="GAVIN AI",
+            font=self._get_font(14, "bold"),
+            fill=accent_blue,
+            anchor="w"
+        )
+        
+        # Status dot right next to title (very close)
+        dot_x = title_x + 72  # Right next to text
+        dot_size = 7
+        self.canvas.create_oval(
+            dot_x, title_y - dot_size // 2,
+            dot_x + dot_size, title_y + dot_size // 2,
+            fill=dot_color,
+            outline=""
+        )
+        
+        # Close button with hover background
+        close_x = self.popup_width - 32
+        close_y = title_y
+        close_bg_color = "#F0F4F5"  # Light gray background on hover (RGB 240, 244, 245)
+        
+        # Background circle for close button (starts as white/invisible, needs fill for events)
+        self.close_bg_id = self.canvas.create_oval(
+            close_x - 16, close_y - 16,
+            close_x + 16, close_y + 16,
+            fill=bg_color,  # Same as background (white) so it's invisible but receives events
+            outline="",
+            tags="close_btn"
+        )
+        
+        # Close button "X"
+        self.close_text_id = self.canvas.create_text(
+            close_x, close_y,
+            text="\u00D7",  # Multiplication sign (cleaner X)
+            font=self._get_font(28, "normal"),
+            fill=text_muted,
+            anchor="center",
+            tags="close_btn"
+        )
+        
+        # Store colors for hover events
+        self._close_bg_color = close_bg_color
+        self._close_bg_normal = bg_color  # White background when not hovering
+        self._text_muted = text_muted
+        self._text_dark = text_dark
+        
+        # Bind close button events with background highlight
+        self.canvas.tag_bind("close_btn", "<Button-1>", lambda e: self.dismiss())
+        self.canvas.tag_bind("close_btn", "<Enter>", self._on_close_hover_enter)
+        self.canvas.tag_bind("close_btn", "<Leave>", self._on_close_hover_leave)
+        
+        # Badge/pill below title
+        badge_y = 68
+        badge_padding_x = 14
+        
+        # Measure badge text width (approximate)
+        badge_char_width = 7.5
+        badge_width = len(self.badge_text) * badge_char_width + badge_padding_x * 2
+        badge_height = 28
+        
+        # Draw badge background (rounded pill)
+        self._draw_smooth_rounded_rect(
+            self.canvas,
+            28, badge_y - badge_height // 2,
+            28 + badge_width, badge_y + badge_height // 2,
+            badge_height // 2,
+            fill=badge_bg,
+            outline=badge_border
+        )
+        
+        # Badge text
+        self.canvas.create_text(
+            28 + badge_width // 2, badge_y,
+            text=self.badge_text,
+            font=self._get_font(12, "normal"),
+            fill=badge_text_color,
+            anchor="center"
+        )
+        
+        # Main message text (large, left-aligned)
+        message_y = 105
+        self.canvas.create_text(
+            28, message_y,
+            text=self.message,
+            font=self._get_font(22, "normal"),
+            fill=text_dark,
+            anchor="nw",
+            width=self.popup_width - 56
+        )
+    
+    def _on_close_hover_enter(self, event):
+        """Show gray background on close button hover."""
+        self.canvas.itemconfig(self.close_bg_id, fill=self._close_bg_color)
+        self.canvas.itemconfig(self.close_text_id, fill=self._text_dark)
+    
+    def _on_close_hover_leave(self, event):
+        """Hide gray background when leaving close button."""
+        self.canvas.itemconfig(self.close_bg_id, fill=self._close_bg_normal)
+        self.canvas.itemconfig(self.close_text_id, fill=self._text_muted)
+    
+    def _draw_smooth_rounded_rect(self, canvas, x1, y1, x2, y2, radius, fill="white", outline=""):
+        """
+        Draw a properly rounded rectangle using arcs for smooth corners.
+        
+        Args:
+            canvas: The canvas to draw on
+            x1, y1: Top-left corner
+            x2, y2: Bottom-right corner
+            radius: Corner radius
+            fill: Fill color
+            outline: Outline color
+        """
+        # Draw the rounded rectangle using multiple shapes
+        # Top edge
+        canvas.create_rectangle(x1 + radius, y1, x2 - radius, y1 + radius, fill=fill, outline="")
+        # Bottom edge
+        canvas.create_rectangle(x1 + radius, y2 - radius, x2 - radius, y2, fill=fill, outline="")
+        # Left edge
+        canvas.create_rectangle(x1, y1 + radius, x1 + radius, y2 - radius, fill=fill, outline="")
+        # Right edge
+        canvas.create_rectangle(x2 - radius, y1 + radius, x2, y2 - radius, fill=fill, outline="")
+        # Center
+        canvas.create_rectangle(x1 + radius, y1 + radius, x2 - radius, y2 - radius, fill=fill, outline="")
+        
+        # Draw corner arcs (circles clipped to quarters)
+        # Top-left corner
+        canvas.create_arc(x1, y1, x1 + radius * 2, y1 + radius * 2, 
+                         start=90, extent=90, fill=fill, outline="")
+        # Top-right corner
+        canvas.create_arc(x2 - radius * 2, y1, x2, y1 + radius * 2, 
+                         start=0, extent=90, fill=fill, outline="")
+        # Bottom-left corner
+        canvas.create_arc(x1, y2 - radius * 2, x1 + radius * 2, y2, 
+                         start=180, extent=90, fill=fill, outline="")
+        # Bottom-right corner
+        canvas.create_arc(x2 - radius * 2, y2 - radius * 2, x2, y2, 
+                         start=270, extent=90, fill=fill, outline="")
+    
+    
+    def _start_dismiss_timer(self):
+        """Start the auto-dismiss countdown."""
+        duration_ms = self.duration * 1000
+        self._dismiss_after_id = self.parent.after(duration_ms, self.dismiss)
+    
+    def dismiss(self):
+        """Close and destroy the popup."""
+        if self._is_dismissed:
+            return
+        
+        self._is_dismissed = True
+        
+        # Cancel pending auto-dismiss timer
+        if self._dismiss_after_id:
+            try:
+                self.parent.after_cancel(self._dismiss_after_id)
+            except Exception:
+                pass
+        
+        # Destroy window
+        try:
+            self.window.destroy()
+        except Exception:
+            pass
+        
+        # Clear active popup reference
+        if NotificationPopup._active_popup is self:
+            NotificationPopup._active_popup = None
+        
+        logger.debug("Notification popup dismissed")
+
+
 class GavinGUI:
     """
     Main GUI application for Gavin AI focus tracker.
@@ -302,7 +625,7 @@ class GavinGUI:
     def __init__(self):
         """Initialize the GUI application."""
         self.root = tk.Tk()
-        self.root.title("Gavin AI")
+        self.root.title("")  # Empty title - no text in title bar
         self.root.configure(bg=COLORS["bg_dark"])
         
         # Window size and positioning - center on screen
@@ -328,6 +651,11 @@ class GavinGUI:
         self.detection_thread: Optional[threading.Thread] = None
         self.current_status = "idle"  # idle, focused, away, phone
         self.session_start_time: Optional[datetime] = None
+        self.session_started = False  # Track if first detection has occurred
+        
+        # Unfocused alert tracking
+        self.unfocused_start_time: Optional[float] = None
+        self.alerts_played: int = 0  # Tracks how many alerts have been played (max 3)
         
         # UI update lock
         self.ui_lock = threading.Lock()
@@ -356,25 +684,28 @@ class GavinGUI:
     
     def _create_fonts(self):
         """Create custom fonts for the UI with fixed sizes."""
-        # Use system fonts - sizes are fixed and don't scale
+        # Use SF Pro Display for consistent modern look (fallback to Helvetica Neue)
+        font_family = "SF Pro Display"
+        font_family_mono = "SF Mono"
+        
         self.font_title = tkfont.Font(
-            family="Helvetica Neue", size=26, weight="bold"
+            family=font_family, size=26, weight="bold"
         )
         
         self.font_timer = tkfont.Font(
-            family="Menlo", size=36, weight="bold"
+            family=font_family_mono, size=36, weight="bold"
         )
         
         self.font_status = tkfont.Font(
-            family="Helvetica", size=15, weight="normal"
+            family=font_family, size=15, weight="normal"
         )
         
         self.font_button = tkfont.Font(
-            family="Helvetica", size=14, weight="bold"
+            family=font_family, size=14, weight="bold"
         )
         
         self.font_small = tkfont.Font(
-            family="Helvetica", size=11, weight="normal"
+            family=font_family, size=11, weight="normal"
         )
     
     
@@ -623,15 +954,19 @@ By clicking 'I Understand', you acknowledge this data processing."""
             )
             return
         
-        # Initialize session
+        # Initialize session (but don't start yet - wait for first detection)
         self.session = Session()
-        self.session.start()
-        self.session_start_time = datetime.now()
+        self.session_started = False  # Will start on first detection
+        self.session_start_time = None  # Timer starts after bootup
         self.is_running = True
         self.should_stop.clear()
         
+        # Reset unfocused alert tracking for new session
+        self.unfocused_start_time = None
+        self.alerts_played = 0
+        
         # Update UI
-        self._update_status("focused", "Monitoring...")
+        self._update_status("focused", "Booting Up...")
         self.start_stop_btn.configure_button(
             text="Stop Session",
             bg_color=COLORS["button_stop"],
@@ -652,6 +987,9 @@ By clicking 'I Understand', you acknowledge this data processing."""
         if not self.is_running:
             return
         
+        # Capture stop time IMMEDIATELY when user clicks stop
+        stop_time = datetime.now()
+        
         # Signal thread to stop
         self.should_stop.set()
         self.is_running = False
@@ -660,9 +998,9 @@ By clicking 'I Understand', you acknowledge this data processing."""
         if self.detection_thread and self.detection_thread.is_alive():
             self.detection_thread.join(timeout=2.0)
         
-        # End session
-        if self.session:
-            self.session.end()
+        # End session (only if it was actually started after first detection)
+        if self.session and self.session_started:
+            self.session.end(stop_time)  # Use the captured stop time
         
         # Update UI to show generating status
         self._update_status("idle", "Generating Reports...")
@@ -682,6 +1020,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         Main detection loop running in a separate thread.
         
         Captures frames from camera and analyzes them using OpenAI Vision API.
+        Also handles unfocused alerts at configured thresholds.
         """
         try:
             detector = VisionDetector()
@@ -705,8 +1044,48 @@ By clicking 'I Understand', you acknowledge this data processing."""
                         # Perform detection using OpenAI Vision
                         detection_state = detector.get_detection_state(frame)
                         
+                        # Re-check stop signal after detection (API call takes 2-3 seconds)
+                        # User may have clicked Stop during this time
+                        if self.should_stop.is_set():
+                            break
+                        
+                        # Start session on first successful detection (eliminates bootup time)
+                        if not self.session_started:
+                            self.session.start()
+                            self.session_start_time = datetime.now()
+                            self.session_started = True
+                            logger.info("First detection complete - session timer started")
+                        
                         # Determine event type
                         event_type = get_event_type(detection_state)
+                        
+                        # Check if user is unfocused (away or phone)
+                        is_unfocused = event_type in (config.EVENT_AWAY, config.EVENT_PHONE_SUSPECTED)
+                        
+                        if is_unfocused:
+                            # Start tracking if not already
+                            if self.unfocused_start_time is None:
+                                self.unfocused_start_time = current_time
+                                self.alerts_played = 0
+                                logger.debug("Started tracking unfocused time")
+                            
+                            # Check if we should play an alert
+                            unfocused_duration = current_time - self.unfocused_start_time
+                            alert_times = config.UNFOCUSED_ALERT_TIMES
+                            
+                            # Play alert if duration exceeds next threshold (and we haven't played all 3)
+                            if (self.alerts_played < len(alert_times) and 
+                                unfocused_duration >= alert_times[self.alerts_played]):
+                                self._play_unfocused_alert()
+                                self.alerts_played += 1
+                        else:
+                            # User is focused - reset tracking
+                            if self.unfocused_start_time is not None:
+                                logger.debug("User refocused - resetting alert tracking")
+                                # Dismiss any active notification popup
+                                self.root.after(0, self._dismiss_alert_popup)
+                            self.unfocused_start_time = None
+                            self.alerts_played = 0
                         
                         # Log event
                         if self.session:
@@ -771,10 +1150,107 @@ By clicking 'I Understand', you acknowledge this data processing."""
         # Schedule next update
         self.root.after(1000, self._update_timer)
     
+    def _play_unfocused_alert(self):
+        """
+        Play the custom Gavin alert sound and show notification popup.
+        
+        Uses the custom MP3 file in data/gavin alert sound.mp3
+        Cross-platform playback:
+        - macOS: afplay (native MP3 support)
+        - Windows: start command with default media player
+        - Linux: mpg123 or ffplay
+        
+        Also displays a supportive notification popup that auto-dismisses.
+        """
+        # Get the alert data for this level (badge_text, message)
+        alert_index = self.alerts_played  # 0, 1, or 2
+        badge_text, message = config.UNFOCUSED_ALERT_MESSAGES[alert_index]
+        
+        def play_sound():
+            # Path to custom alert sound
+            sound_file = Path(__file__).parent.parent / "data" / "gavin_alert_sound.mp3"
+            
+            if not sound_file.exists():
+                logger.warning(f"Alert sound file not found: {sound_file}")
+                return
+            
+            try:
+                if sys.platform == "darwin":
+                    # macOS - afplay supports MP3
+                    subprocess.Popen(
+                        ["afplay", str(sound_file)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                elif sys.platform == "win32":
+                    # Windows - use powershell to play media file
+                    subprocess.Popen(
+                        ["powershell", "-c", f'(New-Object Media.SoundPlayer "{sound_file}").PlaySync()'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        creationflags=subprocess.CREATE_NO_WINDOW
+                    )
+                else:
+                    # Linux - try mpg123 first, fallback to ffplay
+                    try:
+                        subprocess.Popen(
+                            ["mpg123", "-q", str(sound_file)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+                    except FileNotFoundError:
+                        subprocess.Popen(
+                            ["ffplay", "-nodisp", "-autoexit", str(sound_file)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL
+                        )
+            except Exception as e:
+                logger.debug(f"Sound playback error: {e}")
+        
+        # Play sound first (synchronously start the process)
+        play_sound()
+        
+        # Show notification popup on main thread (1 second delay to sync with sound)
+        self.root.after(1500, lambda: self._show_alert_popup(badge_text, message))
+        
+        logger.info(f"Unfocused alert #{self.alerts_played + 1} played")
+    
+    def _show_alert_popup(self, badge_text: str, message: str):
+        """
+        Display the notification popup with badge and message.
+        
+        Args:
+            badge_text: The badge/pill text (e.g., "Focus paused")
+            message: The main supportive message to show
+        """
+        try:
+            NotificationPopup(
+                self.root,
+                badge_text=badge_text,
+                message=message,
+                duration_seconds=config.ALERT_POPUP_DURATION
+            )
+        except Exception as e:
+            logger.error(f"Failed to show notification popup: {e}")
+    
+    def _dismiss_alert_popup(self):
+        """Dismiss any active notification popup when user refocuses."""
+        if NotificationPopup._active_popup is not None:
+            NotificationPopup._active_popup.dismiss()
+            logger.debug("Dismissed alert popup - user refocused")
+    
     def _generate_report(self):
         """Generate PDF report for the completed session."""
-        if not self.session:
+        if not self.session or not self.session_started:
+            # No session or session never got first detection
             self._reset_button_state()
+            self._update_status("idle", "Ready to Start")
+            if not self.session_started:
+                messagebox.showinfo(
+                    "No Session Data",
+                    "Session was stopped before any detection occurred.\n"
+                    "No report generated."
+                )
             return
         
         try:

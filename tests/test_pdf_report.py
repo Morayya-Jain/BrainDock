@@ -155,7 +155,7 @@ def test_pdf_all_categories():
     - Grand (90-100%)
     - Promising (75-89%)
     - Developing (50-74%)
-    - Needs Focus (0-49%)
+    - Needs Tuning (0-49%)
     """
     categories = [
         ('grand', 0.95),          # 95% focus

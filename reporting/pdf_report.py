@@ -181,7 +181,7 @@ FOCUS_CATEGORIES = {
     'needs_focus': {
         'min': 0,
         'max': 49,
-        'label': 'needs focus',
+        'label': 'needs tuning',
         'color': '#B71C1C'  # Red
     }
 }
@@ -229,7 +229,7 @@ def _load_focus_statements() -> Dict[str, List[str]]:
             'grand': ['Your focus rate of {percentage}% is grand - keep it up!'],
             'promising': ['Your focus rate of {percentage}% is promising - you\'re on the right track!'],
             'developing': ['Your focus rate of {percentage}% is developing - keep building your focus skills!'],
-            'needs_focus': ['Your focus rate of {percentage}% needs focus - you can improve with practice!']
+            'needs_focus': ['Your focus rate of {percentage}% needs tuning - you can improve with practice!']
         }
 
 
@@ -283,10 +283,10 @@ def _create_focus_statement_paragraph(focus_pct: float) -> Paragraph:
     colored_statement = statement.replace(f' {category_label}', f' {colored_label}')
     colored_statement = colored_statement.replace(f'{category_label.capitalize()} ', f'{colored_label_cap} ')
     
-    # Handle "needs focus" special case (two words) - replace on already processed statement
-    if category_label == 'needs focus':
-        colored_statement = colored_statement.replace('needs focus', colored_label)
-        colored_statement = colored_statement.replace('Needs focus', colored_label_cap)
+    # Handle "needs tuning" special case (two words) - replace on already processed statement
+    if category_label == 'needs tuning':
+        colored_statement = colored_statement.replace('needs tuning', colored_label)
+        colored_statement = colored_statement.replace('Needs tuning', colored_label_cap)
     
     # Create paragraph style for the statement
     statement_style = ParagraphStyle(
@@ -455,7 +455,7 @@ def _draw_focus_gauge(focus_pct: float) -> Drawing:
     Create a semicircular gauge visualization for focus percentage.
     
     The gauge has 4 colored zones (no labels - legend is separate):
-    - 0-49%: Needs Focus (red)
+    - 0-49%: Needs Tuning (red)
     - 50-75%: Developing (orange)
     - 75-90%: Promising (yellow)
     - 90-100%: Grand (green)
@@ -571,7 +571,7 @@ def _create_focus_legend_table() -> Table:
         ('90-100%', 'Grand', colors.HexColor('#2E7D32')),
         ('75-89%', 'Promising', colors.HexColor('#FFCA28')),
         ('50-74%', 'Developing', colors.HexColor('#F57C00')),
-        ('0-49%', 'Needs Focus', colors.HexColor('#B71C1C')),
+        ('0-49%', 'Needs Tuning', colors.HexColor('#B71C1C')),
     ]
     
     # Build legend table data
@@ -611,7 +611,7 @@ def _create_focus_legend_table() -> Table:
         colors.HexColor('#2E7D32'),  # Grand - green
         colors.HexColor('#FFCA28'),  # Promising - yellow
         colors.HexColor('#F57C00'),  # Developing - orange
-        colors.HexColor('#B71C1C'),  # Needs Focus - red
+        colors.HexColor('#B71C1C'),  # Needs Tuning - red
     ]
     for i, color in enumerate(zone_colors):
         legend_style.append(('TEXTCOLOR', (1, i), (1, i), color))

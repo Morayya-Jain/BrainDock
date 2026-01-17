@@ -50,7 +50,20 @@ DETECTION_FPS = 1                       # Don't increase (cost doubles)
 PHONE_CONFIDENCE_THRESHOLD = 0.5
 PHONE_DETECTION_DURATION_SECONDS = 2
 OPENAI_VISION_MODEL = "gpt-4o-mini"    # Detection
+UNFOCUSED_ALERT_TIMES = [15, 30, 45]   # Alerts at 15s, 30s, 45s unfocused
 ```
+
+---
+
+## 🔔 Unfocused Alert System
+
+When user is unfocused (away or phone), audio alerts play:
+- **1st alert**: After 15 seconds
+- **2nd alert**: After 30 seconds
+- **3rd alert**: After 45 seconds
+- **Then stops** until user refocuses (resets the cycle)
+
+Uses custom sound file: `data/gavin alert sound.mp3` (cross-platform: afplay on macOS, powershell on Windows, mpg123/ffplay on Linux)
 
 ---
 

@@ -42,15 +42,19 @@ class Session:
         self.state_start_time = self.start_time
         print(f"✓ Session started at {self.start_time.strftime('%I:%M %p')}")
     
-    def end(self) -> None:
+    def end(self, end_time: Optional[datetime] = None) -> None:
         """
         End the session, finalize the current state, and log the end time.
+        
+        Args:
+            end_time: Optional end timestamp. If None, uses current time.
+                      Pass explicit time to ensure accuracy when called after delays.
         """
-        self.end_time = datetime.now()
+        self.end_time = end_time or datetime.now()
         
         # Finalize the last state if it exists
         if self.current_state and self.state_start_time:
-            self._finalize_current_state()
+            self._finalize_current_state(self.end_time)
         
         duration = self.get_duration()
         hours = int(duration // 3600)
@@ -95,20 +99,23 @@ class Session:
             elif event_type == config.EVENT_PHONE_SUSPECTED:
                 print(f"📱 Phone usage detected ({timestamp.strftime('%I:%M %p')})")
     
-    def _finalize_current_state(self) -> None:
+    def _finalize_current_state(self, end_time: Optional[datetime] = None) -> None:
         """
         Finalize the current state by calculating its duration and adding to events.
+        
+        Args:
+            end_time: Optional end timestamp. If None, uses current time.
         """
         if not self.current_state or not self.state_start_time:
             return
         
-        end_time = datetime.now()
-        duration = (end_time - self.state_start_time).total_seconds()
+        actual_end_time = end_time or datetime.now()
+        duration = (actual_end_time - self.state_start_time).total_seconds()
         
         event = {
             "type": self.current_state,
             "start": self.state_start_time.isoformat(),
-            "end": end_time.isoformat(),
+            "end": actual_end_time.isoformat(),
             "duration_seconds": duration
         }
         
