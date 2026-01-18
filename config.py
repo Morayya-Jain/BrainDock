@@ -14,18 +14,6 @@ BASE_DIR = Path(__file__).parent
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_VISION_MODEL = "gpt-4o-mini"  # For image analysis (person/gadget detection)
 
-# Vision API settings
-VISION_DETECTION_INTERVAL = 1.0  # Analyze frames every N seconds (to save costs)
-GADGET_CONFIDENCE_THRESHOLD = 0.5  # Confidence threshold for gadget detection
-
-# Detection thresholds
-FACE_DETECTION_CONFIDENCE = 0.5
-AWAY_GRACE_PERIOD_SECONDS = 3  # How long before marking as "away"
-GADGET_DETECTION_ANGLE_THRESHOLD = 25  # degrees (head tilt down) - Legacy, still used in scoring
-GADGET_DETECTION_DURATION_SECONDS = 3  # How long distraction must persist
-DISTRACTION_SCORE_THRESHOLD = 35  # Score 0-100, >35 = distracted (more sensitive!)
-STATE_CHANGE_DEBOUNCE_SECONDS = 3  # Prevent rapid state changes
-
 # Camera Configuration
 CAMERA_INDEX = 0
 CAMERA_WIDE_MODE = True  # Enable wider 16:9 aspect ratio for more desk coverage
@@ -41,7 +29,7 @@ CAMERA_WIDE_RESOLUTIONS = [
 # Default resolution (used if wide mode disabled or as fallback)
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
-DETECTION_FPS = 0.333  # Frames per second to analyse
+DETECTION_FPS = 0.33  # Frames per second to analyse
 
 # Paths
 DATA_DIR = BASE_DIR / "data" / "sessions"

@@ -47,7 +47,10 @@ class VisionDetector:
         # Cache for reducing API calls
         self.last_detection_time = 0
         self.last_detection_result = None
-        self.detection_cache_duration = 1.0  # Cache for 1 second
+        self.detection_cache_duration = 3.0  # Cache for 3 seconds (matches detection interval)
+        
+        # System prompt for caching (static instructions - OpenAI caches these)
+        self.system_prompt = self._build_system_prompt()
         
         logger.info(f"Vision detector initialized with {vision_model}")
     
@@ -72,6 +75,42 @@ class VisionDetector:
         
         return base64_image
     
+    def _build_system_prompt(self) -> str:
+        """
+        Build the system prompt with all detection rules.
+        
+        This is separated so OpenAI can cache it across requests,
+        reducing input token costs by up to 50% on subsequent calls.
+        
+        Returns:
+            System prompt string with all detection instructions
+        """
+        return """You are a focus tracking AI analyzing webcam frames. Respond with ONLY valid JSON.
+
+RESPONSE FORMAT (no other text):
+{"person_present": true/false, "at_desk": true/false, "gadget_visible": true/false, "gadget_confidence": 0.0-1.0, "distraction_type": "phone"/"tablet"/"controller"/"tv"/"none"}
+
+DESK PROXIMITY (at_desk):
+TRUE: Face/upper body clearly visible, at typical webcam working distance
+FALSE: Person small/distant, roaming in background, far from desk
+
+GADGET DETECTION - ONLY detect if BOTH conditions met:
+1. Device screen ON or actively being used
+2. Person's eyes/attention directed AT the gadget
+
+Gadgets: phones, tablets, game controllers, Nintendo Switch, Steam Deck, TV
+
+DO NOT detect if:
+- Person looking elsewhere (not at device)
+- Device screen OFF/face-down
+- Person focused on work (computer, book)
+- Controller just sitting on desk
+
+RULES:
+- person_present=true if any body part visible (even far away)
+- If unsure about gadget usage, set confidence below 0.5
+- If person_present=false, set at_desk=false"""
+    
     def analyze_frame(self, frame: np.ndarray, use_cache: bool = True) -> Dict[str, any]:
         """
         Analyze frame using OpenAI Vision API.
@@ -87,8 +126,7 @@ class VisionDetector:
                 "at_desk": bool (person is at working distance from camera),
                 "gadget_visible": bool (attention + device active, position irrelevant),
                 "gadget_confidence": float (0-1),
-                "distraction_type": str (phone, tablet, controller, tv, or none),
-                "description": str
+                "distraction_type": str (phone, tablet, controller, tv, or none)
             }
         
         Note:
@@ -112,86 +150,21 @@ class VisionDetector:
             # Encode frame
             base64_image = self._encode_frame(frame)
             
-            # Create prompt - be very explicit about JSON format
-            prompt = """You are analyzing a webcam frame for a focus tracking system.
-
-You MUST respond with ONLY a valid JSON object (no other text before or after).
-
-Analyze the image and return this exact JSON format:
-{
-  "person_present": true or false,
-  "at_desk": true or false,
-  "gadget_visible": true or false,
-  "gadget_confidence": 0.0 to 1.0,
-  "distraction_type": "phone" or "tablet" or "controller" or "tv" or "none",
-  "description": "brief description of what you see"
-}
-
-DESK PROXIMITY DETECTION - determine if person is at working distance:
-
-at_desk = TRUE when:
-- Person's face/upper body is clearly visible and fills a reasonable portion of the frame
-- Person appears to be seated at or standing near a workstation
-- Person is leaning back in chair but still at the desk area
-- Person is at typical webcam working distance (within arm's reach of camera)
-
-at_desk = FALSE when:
-- Person appears small/distant in the frame (background figure)
-- Person is clearly roaming around the room away from the desk
-- Only a small silhouette or partial body visible in the distance
-- Person would need to walk several steps to reach the desk/camera
-- Person is in the background of the room, not at the workstation
-
-Note: If person_present is false, set at_desk to false as well.
-
-GADGET DETECTION - Detect distracting devices including:
-- Phones/smartphones
-- Tablets/iPads
-- Game controllers (PlayStation, Xbox, Nintendo Pro Controller)
-- Handheld gaming devices (Nintendo Switch, Steam Deck, PSP)
-- TV/monitor showing non-work content (if person is watching it)
-
-CRITICAL RULES - ONLY set gadget_visible to true if BOTH conditions are met:
-1. Device screen is ON or device is actively being held/used
-2. Person's eyes/attention is directed AT the gadget (looking at it, engaged with it)
-
-IMPORTANT: Gadget can be on desk OR in hands - position doesn't matter. What matters is:
-- Is the person LOOKING at it or engaged with it? (eyes/gaze directed at device)
-- Is the device active/being used? (screen on, controller in use, etc.)
-
-DO NOT detect as gadget usage if:
-- Person's eyes/attention is directed ELSEWHERE (not looking at the device)
-- Device screen is OFF, black, or face-down (even if person is near it)
-- Device is visible but person is clearly focused on work (computer, book, etc.)
-- Device is in pocket/bag or put away
-- Controller is just sitting on desk, not being held
-
-Examples:
-✓ Phone in hands + person looking at screen + screen on = DETECT (type: phone)
-✓ iPad/tablet on lap + person watching it = DETECT (type: tablet)
-✓ Game controller in hands + person playing = DETECT (type: controller)
-✓ Person looking at TV instead of work = DETECT (type: tv)
-✓ Nintendo Switch in hands + person playing = DETECT (type: controller)
-✗ Phone on desk + person looking at computer screen = DO NOT DETECT
-✗ Controller on desk, not being held = DO NOT DETECT
-✗ TV in background but person focused on work = DO NOT DETECT
-
-Other rules:
-- Set person_present to true if you see a person's face or body (even if far away)
-- If unsure about active gadget usage, set confidence below 0.5
-
-Respond with ONLY the JSON object, nothing else."""
-            
-            # Call OpenAI Vision API
+            # Call OpenAI Vision API with system message for prompt caching
+            # System message is cached by OpenAI, reducing costs on subsequent calls
             response = self.client.chat.completions.create(
                 model=self.vision_model,
                 messages=[
+                    {
+                        "role": "system",
+                        "content": self.system_prompt
+                    },
                     {
                         "role": "user",
                         "content": [
                             {
                                 "type": "text",
-                                "text": prompt
+                                "text": "Analyze this frame:"
                             },
                             {
                                 "type": "image_url",
@@ -203,7 +176,7 @@ Respond with ONLY the JSON object, nothing else."""
                         ]
                     }
                 ],
-                max_tokens=200,
+                max_tokens=100,  # Reduced - actual response is ~60 tokens
                 temperature=0.3  # Lower temp for more consistent detection
             )
             
@@ -246,8 +219,7 @@ Respond with ONLY the JSON object, nothing else."""
                 "at_desk": result.get("at_desk", True),  # Default True for backward compat
                 "gadget_visible": result.get("gadget_visible", False),
                 "gadget_confidence": float(result.get("gadget_confidence", 0.0)),
-                "distraction_type": result.get("distraction_type", "none"),
-                "description": result.get("description", "")
+                "distraction_type": result.get("distraction_type", "none")
             }
             
             # Cache result
@@ -272,8 +244,7 @@ Respond with ONLY the JSON object, nothing else."""
                 "at_desk": True,  # Assume at desk on error
                 "gadget_visible": False,
                 "gadget_confidence": 0.0,
-                "distraction_type": "none",
-                "description": f"Error: {str(e)}"
+                "distraction_type": "none"
             }
     
     def detect_presence(self, frame: np.ndarray) -> bool:
@@ -332,7 +303,6 @@ Respond with ONLY the JSON object, nothing else."""
             - at_desk: Person is at working distance (not roaming far away)
             - gadget_suspected: Person is actively using a gadget (phone, tablet, controller, etc.)
             - distraction_type: Type of distraction detected (phone, tablet, controller, tv, none)
-            - ai_description: AI's description of the scene
         """
         result = self.analyze_frame(frame)
         
@@ -340,6 +310,5 @@ Respond with ONLY the JSON object, nothing else."""
             "present": result["person_present"],
             "at_desk": result.get("at_desk", True),  # Default True for backward compat
             "gadget_suspected": result["gadget_visible"] and result["gadget_confidence"] > 0.5,
-            "distraction_type": result["distraction_type"],
-            "ai_description": result["description"]
+            "distraction_type": result["distraction_type"]
         }
