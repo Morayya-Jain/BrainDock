@@ -2,11 +2,11 @@
 
 ## 🤖 Complete Architecture Overview
 
-Gavin AI uses **OpenAI for EVERYTHING**:
+BrainDock uses **OpenAI for EVERYTHING**:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  GAVIN AI ARCHITECTURE                              │
+│  BRAINDOCK ARCHITECTURE                             │
 ├─────────────────────────────────────────────────────┤
 │                                                      │
 │  Camera Frame                                       │

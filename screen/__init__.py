@@ -1,5 +1,5 @@
 """
-Screen monitoring module for Gavin AI.
+Screen monitoring module for BrainDock.
 
 Provides window title and browser URL detection to identify
 distracting websites and applications during focus sessions.

@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get Gavin AI running in 3 minutes!
+Get BrainDock running in 3 minutes!
 
 ## 1. Install Dependencies (1 minute)
 
@@ -51,7 +51,7 @@ Run with `python3 main.py --cli` for terminal-based tracking:
 
 ```
 ┌────────────────────────────────────┐
-│          GAVIN AI                  │
+│         BrainDock                  │
 │         Focus Tracker              │
 │          [1h 45m left]             │
 │                                    │
@@ -65,27 +65,27 @@ Run with `python3 main.py --cli` for terminal-based tracking:
 └────────────────────────────────────┘
 ```
 
-The purple badge shows your remaining trial time. Click it for details.
+The badge shows your remaining trial time. Click it for details.
 
 ### CLI Mode
 
 ```
-🎯 Gavin AI - AI-Powered Focus Assistant
+BrainDock - AI-Powered Focus Assistant
 ================================================
 
-📚 Press Enter to start your focus session...
+Press Enter to start your focus session...
 
-✓ Session started at 02:30 PM
-💡 Monitoring your focus session...
+Session started at 02:30 PM
+Monitoring your focus session...
 
-⚠ Moved away from desk (02:35 PM)
-✓ Back at desk (02:37 PM)
-📱 On another gadget (02:42 PM)
+Moved away from desk (02:35 PM)
+Back at desk (02:37 PM)
+On another gadget (02:42 PM)
 
 Session ended. Duration: 45m
 
-📊 Finalizing session...
-✓ Report saved: ~/Downloads/Gavin_AI Monday 2.30 PM.pdf
+Finalizing session...
+Report saved: ~/Downloads/BrainDock Monday 2.30 PM.pdf
 ```
 
 ## Tips for Best Results
@@ -94,8 +94,8 @@ Session ended. Duration: 45m
 - **Position:** Sit facing the camera
 - **Distance:** Stay within 1-2 meters of the camera
 - **Gadget Detection:** System detects phones, tablets, game controllers, TV, etc.
-  - ✅ Actively using any gadget = Detected (regardless of position)
-  - ❌ Gadget on desk but looking at computer = Not detected
+  - Actively using any gadget = Detected (regardless of position)
+  - Gadget on desk but looking at computer = Not detected
 - **False Positives:** Device position doesn't matter - it's about active engagement
 
 ## Need Help?
@@ -107,13 +107,12 @@ Session ended. Duration: 45m
 
 Your PDF report includes:
 
-✅ Total session duration  
-✅ Focused time percentage  
-✅ Away time tracking  
-✅ Gadget usage detection  
-✅ Timeline of your session  
-✅ AI-generated insights  
-✅ Personalized improvement suggestions  
+- Total session duration  
+- Focused time percentage  
+- Away time tracking  
+- Gadget usage detection  
+- Timeline of your session  
+- AI-generated insights  
+- Personalized improvement suggestions  
 
-Stay focused! 🎯📚
-
+Stay focused!

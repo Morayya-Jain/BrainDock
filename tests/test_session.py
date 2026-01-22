@@ -28,8 +28,8 @@ class TestSession(unittest.TestCase):
     def test_auto_generated_session_id(self):
         """Test that session ID is auto-generated if not provided."""
         session = Session()
-        # Session ID format: "Gavin-AI {Day} {Time}" e.g. "Gavin-AI Monday 02.30 PM"
-        self.assertTrue(session.session_id.startswith("Gavin-AI "))
+        # Session ID format: "BrainDock {Day} {Time}" e.g. "BrainDock Monday 02.30 PM"
+        self.assertTrue(session.session_id.startswith("BrainDock "))
         self.assertIn(" ", session.session_id)  # Contains spaces
     
     def test_session_start(self):

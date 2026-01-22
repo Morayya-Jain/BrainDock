@@ -1,5 +1,5 @@
 """
-Instance Lock - Prevents multiple instances of Gavin AI from running.
+Instance Lock - Prevents multiple instances of BrainDock from running.
 
 Cross-platform implementation using file locking:
 - Unix (macOS/Linux): fcntl.flock()
@@ -19,7 +19,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Lock file location - in the data directory
-LOCK_FILE = Path(__file__).parent / "data" / ".gavin_instance.lock"
+LOCK_FILE = Path(__file__).parent / "data" / ".braindock_instance.lock"
 
 
 class InstanceLock:
@@ -43,7 +43,7 @@ class InstanceLock:
         Initialize instance lock.
         
         Args:
-            lock_file: Path to lock file (default: data/.gavin_instance.lock)
+            lock_file: Path to lock file (default: data/.braindock_instance.lock)
         """
         self.lock_file = lock_file or LOCK_FILE
         self._lock_handle: Optional[object] = None
@@ -156,7 +156,7 @@ _instance_lock: Optional[InstanceLock] = None
 
 def check_single_instance() -> bool:
     """
-    Check if this is the only running instance of Gavin AI.
+    Check if this is the only running instance of BrainDock.
     
     Call this at application startup. If it returns False,
     another instance is already running and you should exit.

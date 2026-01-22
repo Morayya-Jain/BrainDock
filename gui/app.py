@@ -1,5 +1,5 @@
 """
-Gavin AI - Desktop GUI Application
+BrainDock - Desktop GUI Application
 
 A minimal tkinter GUI that wraps the existing detection code,
 providing a user-friendly interface for focus session tracking.
@@ -16,6 +16,13 @@ import os
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
+
+# PIL for logo image support
+try:
+    from PIL import Image, ImageTk
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -34,48 +41,105 @@ from screen.blocklist import Blocklist, BlocklistManager, PRESET_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
-# --- Color Palette ---
-# Soft slate blue theme with warm accents
-COLORS = {
-    "bg_dark": "#1E293B",           # Soft slate blue background
-    "bg_medium": "#334155",         # Card/panel background
-    "bg_light": "#475569",          # Lighter panel elements
-    "accent_primary": "#38BDF8",    # Sky blue accent
-    "accent_warm": "#FB923C",       # Warm orange for alerts
-    "text_primary": "#F1F5F9",      # Off-white text
-    "text_secondary": "#94A3B8",    # Muted text
-    "text_white": "#FFFFFF",        # Pure white for buttons
-    "status_focused": "#4ADE80",    # Green for focused
-    "status_away": "#FBBF24",       # Amber for away
-    "status_gadget": "#F87171",     # Red for gadget distraction
-    "status_screen": "#A78BFA",     # Purple for screen distraction
-    "status_idle": "#64748B",       # Gray for idle
-    "status_paused": "#94A3B8",     # Muted gray for paused
-    "button_start": "#22C55E",      # Green start button
-    "button_start_hover": "#16A34A", # Darker green on hover
-    "button_stop": "#EF4444",       # Red stop button
-    "button_stop_hover": "#DC2626", # Darker red on hover
-    "button_pause": "#64748B",      # Grey pause button
-    "button_pause_hover": "#475569", # Darker grey on hover
-    "button_resume": "#38BDF8",     # Sky blue resume button (same as unlock)
-    "button_resume_hover": "#0EA5E9", # Darker sky blue on hover
-    "button_settings": "#6366F1",   # Indigo for settings button
-    "button_settings_hover": "#4F46E5", # Darker indigo on hover
-    "time_badge": "#8B5CF6",        # Purple for time remaining badge
-    "time_badge_low": "#F97316",    # Orange when time is low
-    "time_badge_expired": "#EF4444", # Red when time expired
-    "toggle_on": "#6366F1",         # Indigo for enabled toggles (different from green Start button)
-    "toggle_off": "#475569",        # Gray for disabled toggles
+# --- Theme System ---
+# Supports light/dark themes (dark mode prepared for future)
+THEMES = {
+    "light": {
+        "bg_primary": "#FFFFFF",        # Main background (white)
+        "bg_secondary": "#F9FAFB",      # Card backgrounds (very light gray)
+        "bg_tertiary": "#F3F4F6",       # Hover states, borders
+        "bg_card": "#FFFFFF",           # Card background
+        "text_primary": "#1F2937",      # Main text (dark gray)
+        "text_secondary": "#6B7280",    # Muted text (gray)
+        "text_white": "#FFFFFF",        # White text for buttons
+        "border": "#9CA3AF",            # Visible borders (medium gray)
+        "border_focus": "#3B82F6",      # Focus ring color
+        "accent_primary": "#3B82F6",    # Primary accent (blue)
+        "accent_warm": "#F59E0B",       # Warm accent for alerts
+        "status_focused": "#10B981",    # Green for focused
+        "status_away": "#F59E0B",       # Amber for away
+        "status_gadget": "#EF4444",     # Red for gadget distraction
+        "status_screen": "#8B5CF6",     # Purple for screen distraction
+        "status_idle": "#9CA3AF",       # Gray for idle
+        "status_paused": "#6B7280",     # Muted gray for paused
+        "button_start": "#10B981",      # Green start button
+        "button_start_hover": "#059669", # Darker green on hover
+        "button_stop": "#EF4444",       # Red stop button
+        "button_stop_hover": "#DC2626", # Darker red on hover
+        "button_pause": "#6B7280",      # Gray pause button
+        "button_pause_hover": "#4B5563", # Darker gray on hover
+        "button_resume": "#3B82F6",     # Blue resume button
+        "button_resume_hover": "#2563EB", # Darker blue on hover
+        "button_settings": "#6B7280",   # Gray for settings
+        "button_settings_hover": "#4B5563", # Darker gray on hover
+        "time_badge": "#8B5CF6",        # Purple for time remaining
+        "time_badge_low": "#F59E0B",    # Orange when time is low
+        "time_badge_expired": "#EF4444", # Red when time expired
+        "toggle_on": "#3B82F6",         # Blue for enabled toggles
+        "toggle_off": "#E5E7EB",        # Light gray for disabled toggles
+        "toggle_text_on": "#FFFFFF",    # White text when toggle on
+        "toggle_text_off": "#6B7280",   # Gray text when toggle off
+    },
+    # Dark theme prepared for future implementation
+    "dark": {
+        "bg_primary": "#1F2937",
+        "bg_secondary": "#374151",
+        "bg_tertiary": "#4B5563",
+        "bg_card": "#374151",
+        "text_primary": "#F9FAFB",
+        "text_secondary": "#9CA3AF",
+        "text_white": "#FFFFFF",
+        "border": "#4B5563",
+        "border_focus": "#60A5FA",
+        "accent_primary": "#60A5FA",
+        "accent_warm": "#FBBF24",
+        "status_focused": "#34D399",
+        "status_away": "#FBBF24",
+        "status_gadget": "#F87171",
+        "status_screen": "#A78BFA",
+        "status_idle": "#6B7280",
+        "status_paused": "#9CA3AF",
+        "button_start": "#10B981",
+        "button_start_hover": "#059669",
+        "button_stop": "#EF4444",
+        "button_stop_hover": "#DC2626",
+        "button_pause": "#6B7280",
+        "button_pause_hover": "#4B5563",
+        "button_resume": "#60A5FA",
+        "button_resume_hover": "#3B82F6",
+        "button_settings": "#6B7280",
+        "button_settings_hover": "#4B5563",
+        "time_badge": "#A78BFA",
+        "time_badge_low": "#FBBF24",
+        "time_badge_expired": "#F87171",
+        "toggle_on": "#60A5FA",
+        "toggle_off": "#4B5563",
+        "toggle_text_on": "#FFFFFF",
+        "toggle_text_off": "#9CA3AF",
+    }
 }
+
+# Current theme (light mode default)
+current_theme = "light"
+
+def get_colors():
+    """Get the current theme's color palette."""
+    return THEMES[current_theme]
+
+# Active color palette (for backward compatibility)
+COLORS = get_colors()
 
 # Privacy settings file
 PRIVACY_FILE = Path(__file__).parent.parent / "data" / ".privacy_accepted"
 
-# Base dimensions for scaling
-BASE_WIDTH = 520
-BASE_HEIGHT = 520
-MIN_WIDTH = 420
-MIN_HEIGHT = 420
+# Assets directory for logos
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
+
+# Base dimensions for scaling (larger default window)
+BASE_WIDTH = 900
+BASE_HEIGHT = 700
+MIN_WIDTH = 600
+MIN_HEIGHT = 500
 
 
 class RoundedFrame(tk.Canvas):
@@ -83,9 +147,11 @@ class RoundedFrame(tk.Canvas):
     A frame with rounded corners using Canvas.
     
     Draws a rounded rectangle background and allows placing widgets inside.
+    Supports optional border for light theme styling.
     """
     
-    def __init__(self, parent, bg_color: str, corner_radius: int = 15, **kwargs):
+    def __init__(self, parent, bg_color: str, corner_radius: int = 15, 
+                 border_color: str = None, border_width: int = 1, **kwargs):
         """
         Initialize rounded frame.
         
@@ -93,14 +159,18 @@ class RoundedFrame(tk.Canvas):
             parent: Parent widget
             bg_color: Background color for the rounded rectangle
             corner_radius: Radius of the corners
+            border_color: Optional border color (None for no border)
+            border_width: Border width in pixels
         """
         # Get parent background for canvas
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_dark"]
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
         
         super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
         
         self.bg_color = bg_color
         self.corner_radius = corner_radius
+        self.border_color = border_color
+        self.border_width = border_width
         self._rect_id = None
         
         # Bind resize to redraw
@@ -109,6 +179,7 @@ class RoundedFrame(tk.Canvas):
     def _on_resize(self, event=None):
         """Redraw the rounded rectangle on resize."""
         self.delete("rounded_bg")
+        self.delete("rounded_border")
         
         width = self.winfo_width()
         height = self.winfo_height()
@@ -118,7 +189,7 @@ class RoundedFrame(tk.Canvas):
     
     def _draw_rounded_rect(self, x1, y1, x2, y2, radius, color):
         """
-        Draw a rounded rectangle.
+        Draw a rounded rectangle with optional border.
         
         Args:
             x1, y1: Top-left corner
@@ -144,6 +215,17 @@ class RoundedFrame(tk.Canvas):
             x1, y1 + radius,
             x1, y1,
         ]
+        
+        # Draw border first if specified
+        if self.border_color:
+            self.create_polygon(
+                points,
+                fill="",
+                outline=self.border_color,
+                width=self.border_width,
+                smooth=True,
+                tags="rounded_border"
+            )
         
         self._rect_id = self.create_polygon(
             points, 
@@ -201,7 +283,7 @@ class RoundedButton(tk.Canvas):
         self._enabled = True
         
         # Get parent background
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_dark"]
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
         
         super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
         
@@ -298,7 +380,7 @@ class RoundedButton(tk.Canvas):
         if "state" in kwargs:
             self._enabled = (kwargs["state"] != tk.DISABLED)
             if not self._enabled:
-                self._current_bg = COLORS["bg_light"]
+                self._current_bg = COLORS["bg_tertiary"]
             else:
                 self._current_bg = self.bg_color
         
@@ -354,7 +436,7 @@ class RoundedBadge(tk.Canvas):
         self._click_callback = None
         
         # Get parent background
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_dark"]
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
         
         super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
         
@@ -442,12 +524,15 @@ class RoundedBadge(tk.Canvas):
         Args:
             text: New badge text
             bg_color: New background color
+            fg_color: New text color
         """
         if "text" in kwargs:
             self.text = kwargs["text"]
         if "bg_color" in kwargs:
             self.bg_color = kwargs["bg_color"]
             self._current_bg = kwargs["bg_color"]
+        if "fg_color" in kwargs:
+            self.fg_color = kwargs["fg_color"]
         
         self._draw_badge()
 
@@ -650,7 +735,7 @@ class NotificationPopup:
         bg_color = "#FFFFFF"           # White background
         text_dark = "#1F2937"          # Dark text for message
         text_muted = "#B0B8C1"         # Light gray for close button
-        accent_blue = "#818CF8"        # Blue color for GAVIN AI title (matching image)
+        accent_blue = "#3B82F6"        # Blue color for BrainDock title
         badge_bg = "#F3F4F6"           # Light gray badge background
         badge_border = "#E5E7EB"       # Badge border
         badge_text_color = "#4B5563"   # Dark gray badge text
@@ -682,19 +767,19 @@ class NotificationPopup:
             fill=bg_color
         )
         
-        # "GAVIN AI" title
+        # "BRAINDOCK" title
         title_y = 32
         title_x = 28
         self.canvas.create_text(
             title_x, title_y,
-            text="GAVIN AI",
+            text="BRAINDOCK",
             font=self._get_font(14, "bold"),
             fill=accent_blue,
             anchor="w"
         )
         
         # Status dot right next to title (very close)
-        dot_x = title_x + 72  # Right next to text
+        dot_x = title_x + 95  # Right next to text (adjusted for longer name)
         dot_size = 7
         self.canvas.create_oval(
             dot_x, title_y - dot_size // 2,
@@ -858,9 +943,9 @@ class NotificationPopup:
         logger.debug("Notification popup dismissed")
 
 
-class GavinGUI:
+class BrainDockGUI:
     """
-    Main GUI application for Gavin AI focus tracker.
+    Main GUI application for BrainDock focus tracker.
     
     Provides a clean, scalable interface with:
     - Start/Stop session button
@@ -873,7 +958,11 @@ class GavinGUI:
         """Initialize the GUI application."""
         self.root = tk.Tk()
         self.root.title("")  # Empty title - no text in title bar
-        self.root.configure(bg=COLORS["bg_dark"])
+        self.root.configure(bg=COLORS["bg_primary"])
+        
+        # Set light appearance on macOS (makes title bar white instead of dark)
+        if sys.platform == "darwin":
+            self._set_macos_light_mode()
         
         # Window size and positioning - center on screen
         # Update to ensure accurate screen dimensions
@@ -956,6 +1045,30 @@ class GavinGUI:
         self.root.attributes('-topmost', True)
         self.root.after(100, lambda: self.root.attributes('-topmost', False))
         self.root.focus_force()
+    
+    def _set_macos_light_mode(self):
+        """
+        Set the window appearance to light mode on macOS.
+        
+        This makes the title bar white instead of dark, matching the light theme.
+        Uses PyObjC if available.
+        """
+        try:
+            from AppKit import NSApplication, NSAppearance
+            
+            # Get the shared application instance
+            app = NSApplication.sharedApplication()
+            
+            # Create light mode (Aqua) appearance and apply it
+            # 'NSAppearanceNameAqua' is the light mode appearance
+            appearance = NSAppearance.appearanceNamed_('NSAppearanceNameAqua')
+            app.setAppearance_(appearance)
+            
+            logger.debug("Set macOS appearance to light mode via PyObjC")
+        except ImportError:
+            logger.debug("PyObjC not available - title bar will follow system theme")
+        except Exception as e:
+            logger.debug(f"Could not set macOS light mode: {e}")
     
     def _create_fonts(self):
         """Create custom fonts for the UI with fixed sizes."""
@@ -1049,8 +1162,8 @@ class GavinGUI:
     def _create_widgets(self):
         """Create all UI widgets with scalable layout."""
         # Main container using grid for proportional spacing
-        self.main_frame = tk.Frame(self.root, bg=COLORS["bg_dark"])
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=20)
+        self.main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
+        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=40)
         
         # Configure grid rows with weights for proportional expansion
         # Row 0: Spacer (expands)
@@ -1064,7 +1177,7 @@ class GavinGUI:
         # Row 8: Spacer (expands)
         
         self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(0, weight=1)   # Top spacer
+        self.main_frame.grid_rowconfigure(0, minsize=20, weight=0)   # Top spacer (smaller)
         self.main_frame.grid_rowconfigure(1, weight=0)   # Title
         self.main_frame.grid_rowconfigure(2, weight=1)   # Spacer
         self.main_frame.grid_rowconfigure(8, weight=0)   # Mode selector (added)
@@ -1075,46 +1188,95 @@ class GavinGUI:
         self.main_frame.grid_rowconfigure(7, weight=0)   # Button
         self.main_frame.grid_rowconfigure(8, weight=1)   # Bottom spacer
         
-        # --- Title Section ---
-        title_frame = tk.Frame(self.main_frame, bg=COLORS["bg_dark"])
-        title_frame.grid(row=1, column=0, sticky="ew")
+        # --- Title Section with Logo ---
+        title_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
+        title_frame.grid(row=1, column=0, sticky="ew", pady=(0, 0))
         
-        self.title_label = tk.Label(
-            title_frame,
-            text="GAVIN AI",
-            font=self.font_title,
-            fg=COLORS["accent_primary"],
-            bg=COLORS["bg_dark"]
-        )
-        self.title_label.pack()
+        # Logo with text container (centered)
+        logo_title_frame = tk.Frame(title_frame, bg=COLORS["bg_primary"])
+        logo_title_frame.pack()
         
-        self.subtitle_label = tk.Label(
-            title_frame,
-            text="Focus Tracker",
-            font=self.font_small,
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
-        )
-        self.subtitle_label.pack()
+        # Load and display logo with text (combined image)
+        self.logo_image = None
+        self.logo_label = None
+        if PIL_AVAILABLE:
+            logo_path = ASSETS_DIR / "logo_with_text.png"
+            if logo_path.exists():
+                try:
+                    # Load logo with text
+                    img = Image.open(logo_path)
+                    
+                    # Convert to RGBA if not already (for proper transparency handling)
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                    
+                    # Crop out empty/transparent space around the logo
+                    bbox = img.getbbox()
+                    if bbox:
+                        img = img.crop(bbox)
+                    
+                    # Resize proportionally - target height of 50px
+                    target_height = 50
+                    aspect_ratio = img.width / img.height
+                    target_width = int(target_height * aspect_ratio)
+                    img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                    self.logo_image = ImageTk.PhotoImage(img)
+                    self.logo_label = tk.Label(
+                        logo_title_frame,
+                        image=self.logo_image,
+                        bg=COLORS["bg_primary"]
+                    )
+                    self.logo_label.pack()
+                except Exception as e:
+                    logger.warning(f"Could not load logo: {e}")
+                    # Fallback to text-only title
+                    self.title_label = tk.Label(
+                        logo_title_frame,
+                        text="BrainDock",
+                        font=self.font_title,
+                        fg=COLORS["text_primary"],
+                        bg=COLORS["bg_primary"]
+                    )
+                    self.title_label.pack()
+            else:
+                # Fallback to text-only title if image not found
+                self.title_label = tk.Label(
+                    logo_title_frame,
+                    text="BrainDock",
+                    font=self.font_title,
+                    fg=COLORS["text_primary"],
+                    bg=COLORS["bg_primary"]
+                )
+                self.title_label.pack()
+        else:
+            # Fallback to text-only title if PIL not available
+            self.title_label = tk.Label(
+                logo_title_frame,
+                text="BrainDock",
+                font=self.font_title,
+                fg=COLORS["text_primary"],
+                bg=COLORS["bg_primary"]
+            )
+            self.title_label.pack()
         
         # --- Time Remaining Badge (clickable for details) ---
-        self.time_badge_frame = tk.Frame(title_frame, bg=COLORS["bg_dark"])
-        self.time_badge_frame.pack(pady=(10, 0))
+        self.time_badge_frame = tk.Frame(title_frame, bg=COLORS["bg_primary"])
+        self.time_badge_frame.pack(pady=(15, 0))
         
-        # Rounded badge for time remaining - looks like other buttons
+        # Rounded badge for time remaining - subtle style for light theme
         self.time_badge = RoundedBadge(
             self.time_badge_frame,
             text="2h 0m left",
-            bg_color=COLORS["time_badge"],
-            hover_color="#9D7AFA",  # Slightly lighter purple on hover
-            fg_color=COLORS["text_white"],
+            bg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["bg_tertiary"],
+            fg_color=COLORS["text_secondary"],
             font=self.font_badge,
-            corner_radius=10,
+            corner_radius=8,
             padx=16,
             pady=6,
             clickable=True,
-            width=110,
-            height=32
+            width=120,
+            height=34
         )
         self.time_badge.pack()
         self.time_badge.bind_click(self._show_usage_details)
@@ -1122,20 +1284,22 @@ class GavinGUI:
         # Lockout overlay (hidden by default)
         self.lockout_frame: Optional[tk.Frame] = None
         
-        # --- Status Card (Rounded) ---
-        status_container = tk.Frame(self.main_frame, bg=COLORS["bg_dark"])
-        status_container.grid(row=3, column=0, sticky="ew", padx=10)
+        # --- Status Card (Rounded with border) ---
+        status_container = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
+        status_container.grid(row=3, column=0, sticky="ew", padx=40)
         
         self.status_card = RoundedFrame(
             status_container,
-            bg_color=COLORS["bg_medium"],
+            bg_color=COLORS["bg_card"],
             corner_radius=12,
-            height=60
+            border_color=COLORS["border"],
+            border_width=2,
+            height=70
         )
         self.status_card.pack(fill=tk.X)
         
         # Status content frame (inside the rounded card)
-        self.status_content = tk.Frame(self.status_card, bg=COLORS["bg_medium"])
+        self.status_content = tk.Frame(self.status_card, bg=COLORS["bg_card"])
         self.status_content.place(relx=0.5, rely=0.5, anchor="center")
         
         # Status dot (using canvas for round shape)
@@ -1143,7 +1307,7 @@ class GavinGUI:
             self.status_content,
             width=14,
             height=14,
-            bg=COLORS["bg_medium"],
+            bg=COLORS["bg_card"],
             highlightthickness=0
         )
         self.status_dot.pack(side=tk.LEFT, padx=(0, 10))
@@ -1154,12 +1318,12 @@ class GavinGUI:
             text="Ready to Start",
             font=self.font_status,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_medium"]
+            bg=COLORS["bg_card"]
         )
         self.status_label.pack(side=tk.LEFT)
         
         # --- Timer Display ---
-        timer_frame = tk.Frame(self.main_frame, bg=COLORS["bg_dark"])
+        timer_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
         timer_frame.grid(row=5, column=0, sticky="ew")
         
         self.timer_label = tk.Label(
@@ -1167,7 +1331,7 @@ class GavinGUI:
             text="00:00:00",
             font=self.font_timer,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         self.timer_label.pack()
         
@@ -1176,12 +1340,12 @@ class GavinGUI:
             text="Session Duration",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         self.timer_sub_label.pack(pady=(5, 0))
         
         # --- Button Section ---
-        button_frame = tk.Frame(self.main_frame, bg=COLORS["bg_dark"])
+        button_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
         button_frame.grid(row=7, column=0, sticky="ew")
         
         # Pause/Resume Button (Rounded) - hidden initially, appears when session running
@@ -1194,8 +1358,8 @@ class GavinGUI:
             fg_color=COLORS["text_white"],
             font=self.font_button,
             corner_radius=10,
-            width=180,
-            height=52
+            width=200,
+            height=56
         )
         # Hidden initially - will be shown when session starts
         
@@ -1209,8 +1373,8 @@ class GavinGUI:
             fg_color=COLORS["text_white"],
             font=self.font_button,
             corner_radius=10,
-            width=180,
-            height=52
+            width=200,
+            height=56
         )
         self.start_stop_btn.pack()
         
@@ -1225,8 +1389,8 @@ class GavinGUI:
         Also provides access to blocklist settings.
         """
         # Mode selector container
-        self.mode_frame = tk.Frame(self.main_frame, bg=COLORS["bg_dark"])
-        self.mode_frame.grid(row=8, column=0, sticky="ew", pady=(15, 0))
+        self.mode_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
+        self.mode_frame.grid(row=8, column=0, sticky="ew", pady=(25, 0))
         
         # Mode label
         mode_label = tk.Label(
@@ -1234,52 +1398,55 @@ class GavinGUI:
             text="Monitoring Mode",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         mode_label.pack()
         
         # Mode buttons container
-        mode_buttons_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_dark"])
-        mode_buttons_frame.pack(pady=(5, 0))
+        mode_buttons_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_primary"])
+        mode_buttons_frame.pack(pady=(8, 0))
         
         # Create mode toggle buttons
         self.mode_var = tk.StringVar(value=config.MODE_CAMERA_ONLY)
         
         modes = [
-            (config.MODE_CAMERA_ONLY, "📷 Camera"),
-            (config.MODE_SCREEN_ONLY, "💻 Screen"),
-            (config.MODE_BOTH, "📷 + 💻 Both"),
+            (config.MODE_CAMERA_ONLY, "Camera"),
+            (config.MODE_SCREEN_ONLY, "Screen"),
+            (config.MODE_BOTH, "Both"),
         ]
         
         self.mode_buttons = {}
         for mode_id, mode_text in modes:
+            # Light theme: selected = accent bg with white text, unselected = light bg with gray text
+            is_selected = mode_id == self.monitoring_mode
             btn = tk.Label(
                 mode_buttons_frame,
                 text=mode_text,
                 font=self.font_small,
-                fg=COLORS["text_white"] if mode_id == self.monitoring_mode else COLORS["text_secondary"],
-                bg=COLORS["toggle_on"] if mode_id == self.monitoring_mode else COLORS["toggle_off"],
-                padx=12,
-                pady=6,
+                fg=COLORS["text_white"] if is_selected else COLORS["text_secondary"],
+                bg=COLORS["toggle_on"] if is_selected else COLORS["toggle_off"],
+                padx=16,
+                pady=8,
             )
-            btn.pack(side=tk.LEFT, padx=2)
+            btn.pack(side=tk.LEFT, padx=3)
             btn.bind("<Button-1>", lambda e, m=mode_id: self._set_monitoring_mode(m))
             self.mode_buttons[mode_id] = btn
         
-        # Settings button (for blocklist management)
-        settings_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_dark"])
-        settings_frame.pack(pady=(8, 0))
+        # Settings button (for blocklist management) - text link style
+        settings_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_primary"])
+        settings_frame.pack(pady=(12, 0))
         
         self.settings_btn = tk.Label(
             settings_frame,
-            text="⚙️ Blocklist Settings",
+            text="Blocklist Settings",
             font=self.font_small,
             fg=COLORS["accent_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"],
+            cursor="hand2"
         )
         self.settings_btn.pack()
         self.settings_btn.bind("<Button-1>", lambda e: self._show_blocklist_settings())
-        self.settings_btn.bind("<Enter>", lambda e: self.settings_btn.configure(fg=COLORS["accent_warm"]))
+        self.settings_btn.bind("<Enter>", lambda e: self.settings_btn.configure(fg=COLORS["status_focused"]))
         self.settings_btn.bind("<Leave>", lambda e: self.settings_btn.configure(fg=COLORS["accent_primary"]))
     
     def _set_monitoring_mode(self, mode: str):
@@ -1325,7 +1492,7 @@ class GavinGUI:
         # Create settings window (larger to accommodate separate URL/App fields)
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Blocklist Settings")
-        settings_window.configure(bg=COLORS["bg_dark"])
+        settings_window.configure(bg=COLORS["bg_primary"])
         settings_window.geometry("420x700")
         settings_window.resizable(False, False)
         
@@ -1338,7 +1505,7 @@ class GavinGUI:
         settings_window.geometry(f"+{x}+{y}")
         
         # Main container with padding
-        main_container = tk.Frame(settings_window, bg=COLORS["bg_dark"])
+        main_container = tk.Frame(settings_window, bg=COLORS["bg_primary"])
         main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         
         # Title
@@ -1347,7 +1514,7 @@ class GavinGUI:
             text="Blocklist Settings",
             font=self.font_title,
             fg=COLORS["accent_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         title.pack()
         
@@ -1356,7 +1523,7 @@ class GavinGUI:
             text="Configure which sites/apps to block",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         subtitle.pack(pady=(5, 15))
         
@@ -1366,20 +1533,20 @@ class GavinGUI:
             text="Preset Categories",
             font=self.font_status,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         categories_label.pack(anchor="w")
         
         # Category toggles
         self.category_vars = {}
-        categories_frame = tk.Frame(main_container, bg=COLORS["bg_dark"])
+        categories_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
         categories_frame.pack(fill=tk.X, pady=(5, 15))
         
         for cat_id, cat_data in PRESET_CATEGORIES.items():
             var = tk.BooleanVar(value=cat_id in self.blocklist.enabled_categories)
             self.category_vars[cat_id] = var
             
-            row = tk.Frame(categories_frame, bg=COLORS["bg_dark"])
+            row = tk.Frame(categories_frame, bg=COLORS["bg_primary"])
             row.pack(fill=tk.X, pady=2)
             
             cb = tk.Checkbutton(
@@ -1388,9 +1555,9 @@ class GavinGUI:
                 variable=var,
                 font=self.font_small,
                 fg=COLORS["text_primary"],
-                bg=COLORS["bg_dark"],
-                selectcolor=COLORS["bg_medium"],
-                activebackground=COLORS["bg_dark"],
+                bg=COLORS["bg_primary"],
+                selectcolor=COLORS["bg_secondary"],
+                activebackground=COLORS["bg_primary"],
                 activeforeground=COLORS["text_primary"],
                 command=lambda c=cat_id, v=var: self._toggle_category(c, v.get())
             )
@@ -1402,7 +1569,7 @@ class GavinGUI:
                 text=f"({len(cat_data['patterns'])} sites)",
                 font=self.font_small,
                 fg=COLORS["accent_primary"],
-                bg=COLORS["bg_dark"]
+                bg=COLORS["bg_primary"]
             )
             desc.pack(side=tk.LEFT, padx=(5, 0))
             # Bind click to show sites popup
@@ -1416,7 +1583,7 @@ class GavinGUI:
             text="Custom URLs/Domains",
             font=self.font_status,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         urls_label.pack(anchor="w", pady=(10, 2))
         
@@ -1425,19 +1592,19 @@ class GavinGUI:
             text="Add website URLs to block (e.g., example.com)",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         urls_help.pack(anchor="w")
         
         # URLs text area with validation feedback
-        urls_frame = tk.Frame(main_container, bg=COLORS["bg_medium"])
+        urls_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"])
         urls_frame.pack(fill=tk.X, pady=(3, 5))
         
         self.custom_urls_text = tk.Text(
             urls_frame,
             font=self.font_small,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_medium"],
+            bg=COLORS["bg_secondary"],
             insertbackground=COLORS["text_primary"],
             height=3,
             wrap=tk.WORD
@@ -1450,7 +1617,7 @@ class GavinGUI:
             text="",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"],
+            bg=COLORS["bg_primary"],
         )
         self.url_validation_label.pack(anchor="w")
         self.url_validation_tooltip = Tooltip(self.url_validation_label, "")
@@ -1465,7 +1632,7 @@ class GavinGUI:
             text="Custom App Names",
             font=self.font_status,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         apps_label.pack(anchor="w", pady=(8, 2))
         
@@ -1474,19 +1641,19 @@ class GavinGUI:
             text="Add desktop app names to block (e.g., Steam, Discord)",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         apps_help.pack(anchor="w")
         
         # Apps text area with validation feedback
-        apps_frame = tk.Frame(main_container, bg=COLORS["bg_medium"])
+        apps_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"])
         apps_frame.pack(fill=tk.X, pady=(3, 5))
         
         self.custom_apps_text = tk.Text(
             apps_frame,
             font=self.font_small,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_medium"],
+            bg=COLORS["bg_secondary"],
             insertbackground=COLORS["text_primary"],
             height=3,
             wrap=tk.WORD
@@ -1499,7 +1666,7 @@ class GavinGUI:
             text="",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"],
+            bg=COLORS["bg_primary"],
         )
         self.app_validation_label.pack(anchor="w")
         self.app_validation_tooltip = Tooltip(self.app_validation_label, "")
@@ -1513,7 +1680,7 @@ class GavinGUI:
         self.custom_apps_text.bind("<KeyRelease>", lambda e: self._validate_apps_realtime())
         
         # AI Fallback option (advanced) - OFF BY DEFAULT
-        ai_frame = tk.Frame(main_container, bg=COLORS["bg_dark"])
+        ai_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
         ai_frame.pack(fill=tk.X, pady=(10, 15))
         
         self.ai_fallback_var = tk.BooleanVar(value=self.use_ai_fallback)
@@ -1523,9 +1690,9 @@ class GavinGUI:
             variable=self.ai_fallback_var,
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"],
-            selectcolor=COLORS["bg_medium"],
-            activebackground=COLORS["bg_dark"],
+            bg=COLORS["bg_primary"],
+            selectcolor=COLORS["bg_secondary"],
+            activebackground=COLORS["bg_primary"],
             activeforeground=COLORS["text_secondary"],
         )
         ai_cb.pack(anchor="w")
@@ -1535,16 +1702,16 @@ class GavinGUI:
             text="⚠️ Takes screenshots - only use if URL detection fails",
             font=self.font_small,
             fg=COLORS["accent_warm"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         ai_help.pack(anchor="w", padx=(20, 0))
         
         # Buttons - centered at bottom
-        button_frame = tk.Frame(main_container, bg=COLORS["bg_dark"])
+        button_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
         button_frame.pack(fill=tk.X, pady=(10, 0))
         
         # Center the buttons
-        button_container = tk.Frame(button_frame, bg=COLORS["bg_dark"])
+        button_container = tk.Frame(button_frame, bg=COLORS["bg_primary"])
         button_container.pack()
         
         save_btn = RoundedButton(
@@ -1599,7 +1766,7 @@ class GavinGUI:
         # Create a small popup window
         sites_popup = tk.Toplevel(self.root)
         sites_popup.title(f"{cat_data['name']} Sites")
-        sites_popup.configure(bg="#1E293B")  # Dark background
+        sites_popup.configure(bg=COLORS["bg_primary"])
         sites_popup.geometry("320x320")
         sites_popup.resizable(False, False)
         
@@ -1615,7 +1782,7 @@ class GavinGUI:
         sites_popup.focus_set()
         
         # Main container
-        container = tk.Frame(sites_popup, bg="#1E293B")
+        container = tk.Frame(sites_popup, bg=COLORS["bg_primary"])
         container.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
         
         # Title
@@ -1623,8 +1790,8 @@ class GavinGUI:
             container,
             text=cat_data['name'],
             font=self.font_status,
-            fg="#38BDF8",  # Sky blue
-            bg="#1E293B"
+            fg=COLORS["accent_primary"],
+            bg=COLORS["bg_primary"]
         )
         title.pack()
         
@@ -1632,23 +1799,23 @@ class GavinGUI:
             container,
             text=cat_data.get('description', ''),
             font=self.font_small,
-            fg="#94A3B8",  # Secondary text
-            bg="#1E293B"
+            fg=COLORS["text_secondary"],
+            bg=COLORS["bg_primary"]
         )
         desc.pack(pady=(0, 10))
         
-        # Sites list using a Listbox (better for dark themes)
-        list_frame = tk.Frame(container, bg="#334155")
+        # Sites list using a Listbox
+        list_frame = tk.Frame(container, bg=COLORS["bg_secondary"], highlightbackground=COLORS["border"], highlightthickness=1)
         list_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Use Listbox instead of Text widget for better compatibility
+        # Use Listbox for site listing
         sites_listbox = tk.Listbox(
             list_frame,
             font=self.font_small,
-            fg="#F1F5F9",  # Light text
-            bg="#334155",  # Dark slate background
-            selectbackground="#475569",
-            selectforeground="#F1F5F9",
+            fg=COLORS["text_primary"],
+            bg=COLORS["bg_secondary"],
+            selectbackground=COLORS["bg_tertiary"],
+            selectforeground=COLORS["text_primary"],
             highlightthickness=0,
             bd=0,
             relief=tk.FLAT
@@ -1664,14 +1831,14 @@ class GavinGUI:
             sites_popup.grab_release()
             sites_popup.destroy()
         
-        # Use RoundedButton for consistent styling with rounded corners
+        # Use RoundedButton for consistent styling
         close_btn = RoundedButton(
             container,
             text="Close",
             command=close_popup,
-            bg_color="#475569",       # Dark slate grey
-            hover_color="#64748B",    # Lighter slate on hover
-            fg_color="#F1F5F9",       # Light text
+            bg_color=COLORS["button_settings"],
+            hover_color=COLORS["button_settings_hover"],
+            fg_color=COLORS["text_white"],
             font=self.font_small,
             corner_radius=10,
             padx=24,
@@ -2645,7 +2812,7 @@ class GavinGUI:
     
     def _show_privacy_notice(self):
         """Display the privacy notice popup."""
-        privacy_text = """Gavin AI uses OpenAI's Vision API to monitor your focus sessions.
+        privacy_text = """BrainDock uses OpenAI's Vision API to monitor your focus sessions.
 
 How it works:
 • Camera frames are sent to OpenAI for analysis
@@ -2736,20 +2903,25 @@ By clicking 'I Understand', you acknowledge this data processing."""
         time_text = self.usage_limiter.format_time(int(remaining))
         
         # Determine badge color based on remaining time
+        # Use white text on colored backgrounds for better contrast
         if remaining <= 0:
             badge_color = COLORS["time_badge_expired"]
+            text_color = COLORS["text_white"]
             time_text = "Time expired"
         elif remaining <= 600:  # 10 minutes or less
             badge_color = COLORS["time_badge_expired"]
+            text_color = COLORS["text_white"]
             time_text = f"{time_text} left"
         elif remaining <= 1800:  # 30 minutes or less
             badge_color = COLORS["time_badge_low"]
+            text_color = COLORS["text_white"]
             time_text = f"{time_text} left"
         else:
             badge_color = COLORS["time_badge"]
+            text_color = COLORS["text_white"]
             time_text = f"{time_text} left"
         
-        self.time_badge.configure_badge(text=time_text, bg_color=badge_color)
+        self.time_badge.configure_badge(text=time_text, bg_color=badge_color, fg_color=text_color)
     
     def _show_usage_details(self, event=None):
         """Show a popup with detailed usage information."""
@@ -2769,12 +2941,12 @@ By clicking 'I Understand', you acknowledge this data processing."""
         # Create overlay frame that covers the main content
         self.lockout_frame = tk.Frame(
             self.main_frame,
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         self.lockout_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         
         # Center content
-        content_frame = tk.Frame(self.lockout_frame, bg=COLORS["bg_dark"])
+        content_frame = tk.Frame(self.lockout_frame, bg=COLORS["bg_primary"])
         content_frame.place(relx=0.5, rely=0.5, anchor="center")
         
         # Expired icon/text
@@ -2783,7 +2955,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text="⏱️",
             font=tkfont.Font(size=48),
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         expired_label.pack(pady=(0, 10))
         
@@ -2792,16 +2964,16 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text="Time Exhausted",
             font=self.font_title,
             fg=COLORS["time_badge_expired"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         title_label.pack(pady=(0, 10))
         
         message_label = tk.Label(
             content_frame,
-            text="Your trial time has run out.\nRequest more time to continue using Gavin AI.",
+            text="Your trial time has run out.\nRequest more time to continue using BrainDock.",
             font=self.font_status,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"],
+            bg=COLORS["bg_primary"],
             justify="center"
         )
         message_label.pack(pady=(0, 20))
@@ -2851,10 +3023,10 @@ By clicking 'I Understand', you acknowledge this data processing."""
         # Create dialog window
         dialog = tk.Toplevel(self.root)
         dialog.title("Unlock More Time")
-        dialog.configure(bg=COLORS["bg_dark"])
+        dialog.configure(bg=COLORS["bg_primary"])
         dialog.resizable(False, False)
         
-        # Size and position - center on screen (like main Gavin UI)
+        # Size and position - center on screen (like main BrainDock UI)
         dialog_width = 350
         dialog_height = 200
         dialog.update_idletasks()
@@ -2869,7 +3041,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         dialog.grab_set()
         
         # Content
-        content = tk.Frame(dialog, bg=COLORS["bg_dark"])
+        content = tk.Frame(dialog, bg=COLORS["bg_primary"])
         content.pack(fill=tk.BOTH, expand=True, padx=25, pady=20)
         
         title = tk.Label(
@@ -2877,7 +3049,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text="Enter Password",
             font=self.font_status,
             fg=COLORS["text_primary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         title.pack(pady=(0, 5))
         
@@ -2887,7 +3059,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text=f"Enter the unlock password to add {extension_time} more",
             font=self.font_small,
             fg=COLORS["text_secondary"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         subtitle.pack(pady=(0, 15))
         
@@ -2909,7 +3081,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text="",
             font=self.font_small,
             fg=COLORS["time_badge_expired"],
-            bg=COLORS["bg_dark"]
+            bg=COLORS["bg_primary"]
         )
         error_label.pack(pady=(0, 10))
         
@@ -2941,7 +3113,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         password_entry.bind("<Return>", lambda e: try_unlock())
         
         # Buttons frame
-        btn_frame = tk.Frame(content, bg=COLORS["bg_dark"])
+        btn_frame = tk.Frame(content, bg=COLORS["bg_primary"])
         btn_frame.pack(fill=tk.X)
         
         cancel_btn = tk.Button(
@@ -3674,9 +3846,9 @@ By clicking 'I Understand', you acknowledge this data processing."""
     
     def _play_unfocused_alert(self):
         """
-        Play the custom Gavin alert sound and show notification popup.
+        Play the custom BrainDock alert sound and show notification popup.
         
-        Uses the custom MP3 file in data/gavin alert sound.mp3
+        Uses the custom MP3 file in data/braindock_alert_sound.mp3
         Cross-platform playback:
         - macOS: afplay (native MP3 support)
         - Windows: start command with default media player
@@ -3690,7 +3862,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         
         def play_sound():
             # Path to custom alert sound
-            sound_file = Path(__file__).parent.parent / "data" / "gavin_alert_sound.mp3"
+            sound_file = Path(__file__).parent.parent / "data" / "braindock_alert_sound.mp3"
             
             if not sound_file.exists():
                 logger.warning(f"Alert sound file not found: {sound_file}")
@@ -3916,7 +4088,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
     
     def run(self):
         """Start the GUI application main loop."""
-        logger.info("Starting Gavin AI GUI")
+        logger.info("Starting BrainDock GUI")
         self.root.mainloop()
 
 
@@ -3943,8 +4115,8 @@ def main():
         root = tk.Tk()
         root.withdraw()
         messagebox.showerror(
-            "Gavin AI Already Running",
-            f"Another instance of Gavin AI is already running{pid_info}.\n\n"
+            "BrainDock Already Running",
+            f"Another instance of BrainDock is already running{pid_info}.\n\n"
             "Only one instance can run at a time.\n"
             "Please close the other instance first."
         )
@@ -3956,7 +4128,7 @@ def main():
         logger.warning("OpenAI API key not found - user will be prompted")
     
     # Create and run GUI
-    app = GavinGUI()
+    app = BrainDockGUI()
     app.run()
 
 

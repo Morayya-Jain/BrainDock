@@ -38,7 +38,7 @@ ENV/
 # Generated files
 data/sessions
 data/.privacy_accepted
-data/.gavin_instance.lock
+data/.braindock_instance.lock
 data/usage_data.json
 data/blocklist.json
 reports/

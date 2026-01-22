@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Gavin AI - Main Entry Point
+BrainDock - Main Entry Point
 
 A local AI-powered focus tracker that monitors presence and phone usage
 via webcam, logs events, and generates PDF reports with
@@ -43,13 +43,13 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
-class GavinAI:
+class BrainDock:
     """
     Main application class that orchestrates the focus tracking session.
     """
     
     def __init__(self):
-        """Initialize Gavin AI."""
+        """Initialize BrainDock."""
         self.session: Optional[Session] = None
         self.running = False
         self.should_stop = False
@@ -82,7 +82,7 @@ class GavinAI:
     def display_welcome(self):
         """Display welcome message and instructions."""
         print("\n" + "=" * 60)
-        print("🎯 Gavin AI - AI-Powered Focus Assistant")
+        print("🎯 BrainDock - AI-Powered Focus Assistant")
         print("=" * 60)
         print("\nThis app will:")
         print("  • Monitor your presence via OpenAI Vision API")
@@ -272,7 +272,7 @@ class GavinAI:
 
 def main_cli():
     """Run the CLI version of the application."""
-    tracker = GavinAI()
+    tracker = BrainDock()
     
     # Display welcome and check requirements
     tracker.display_welcome()
@@ -304,7 +304,7 @@ def main():
     Default mode is GUI unless --cli is specified.
     """
     parser = argparse.ArgumentParser(
-        description="Gavin AI - AI-Powered Focus Tracker",
+        description="BrainDock - AI-Powered Focus Tracker",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -332,7 +332,7 @@ Examples:
         pid_info = f" (PID: {existing_pid})" if existing_pid else ""
         
         if args.cli:
-            print("\n❌ Gavin AI is already running" + pid_info)
+            print("\n❌ BrainDock is already running" + pid_info)
             print("   Only one instance can run at a time.")
             print("   Please close the other instance first.\n")
         else:
@@ -343,15 +343,15 @@ Examples:
                 root = tk.Tk()
                 root.withdraw()  # Hide the main window
                 messagebox.showerror(
-                    "Gavin AI Already Running",
-                    f"Another instance of Gavin AI is already running{pid_info}.\n\n"
+                    "BrainDock Already Running",
+                    f"Another instance of BrainDock is already running{pid_info}.\n\n"
                     "Only one instance can run at a time.\n"
                     "Please close the other instance first."
                 )
                 root.destroy()
             except Exception:
                 # Fallback to console if tkinter fails
-                print("\n❌ Gavin AI is already running" + pid_info)
+                print("\n❌ BrainDock is already running" + pid_info)
                 print("   Only one instance can run at a time.\n")
         
         sys.exit(1)

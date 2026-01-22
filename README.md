@@ -1,4 +1,4 @@
-# Gavin AI
+# BrainDock
 
 A local AI-powered focus tracker that monitors presence and **gadget distractions** via webcam, logs events, and generates PDF reports.
 
@@ -8,9 +8,9 @@ A local AI-powered focus tracker that monitors presence and **gadget distraction
 - **AI-Powered Detection**: Uses OpenAI Vision API to detect person presence and gadget distractions
 - **Smart Gadget Detection**: Detects device usage based on attention + active engagement (not physical position)
   - Detects: Phones, tablets/iPads, game controllers, Nintendo Switch, TV, etc.
-  - ✅ Detects: Person actively using any gadget (looking at it + device active)
-  - ❌ Ignores: Gadget on desk but person looking elsewhere, or device inactive
-  - ❌ Ignores: Smartwatches/Apple Watch (used for time/notifications, not distractions)
+  - Detects: Person actively using any gadget (looking at it + device active)
+  - Ignores: Gadget on desk but person looking elsewhere, or device inactive
+  - Ignores: Smartwatches/Apple Watch (used for time/notifications, not distractions)
 - **Session Analytics**: Computes focused time, away time, and gadget usage statistics
 - **PDF Reports**: Professional combined PDF with summary statistics and full session logs
 - **Privacy-Conscious**: Camera frames analyzed by OpenAI (30-day retention), no local video storage
@@ -86,7 +86,7 @@ python main.py --cli
 
 PDF reports are automatically saved to your **Downloads folder**:
 ```
-~/Downloads/Gavin_AI Monday 2.45 PM.pdf
+~/Downloads/BrainDock Monday 2.45 PM.pdf
 ```
 
 Session data is also saved as JSON in `data/sessions/` for future analysis.
@@ -94,12 +94,15 @@ Session data is also saved as JSON in `data/sessions/` for future analysis.
 ## Project Structure
 
 ```
-gavin_ai/
+braindock/
 ├── main.py                    # Main entry point (GUI by default, --cli for CLI)
 ├── config.py                  # Configuration and constants
 ├── .env.example               # Example environment variables
 ├── requirements.txt           # Dependencies
 ├── README.md                  # Documentation
+├── assets/                    # Logo images
+│   ├── logo_icon.png
+│   └── logo_with_text.png
 ├── gui/
 │   ├── __init__.py
 │   └── app.py                # Desktop GUI application (tkinter)
@@ -169,11 +172,11 @@ Edit `config.py` to customize:
 - **Explicitly excluded**: Smartwatches/Apple Watch (not considered distractions)
 - **Position doesn't matter**: Gadget can be on desk or in hands
 - **Examples:**
-  - ✅ Phone/tablet in use + looking at it = Detected
-  - ✅ Game controller in hands + playing = Detected
-  - ❌ Phone on desk + looking at computer = NOT detected
-  - ❌ Controller sitting on desk = NOT detected
-  - ❌ Smartwatch on wrist = NOT detected (checking time is fine)
+  - Phone/tablet in use + looking at it = Detected
+  - Game controller in hands + playing = Detected
+  - Phone on desk + looking at computer = NOT detected
+  - Controller sitting on desk = NOT detected
+  - Smartwatch on wrist = NOT detected (checking time is fine)
 
 ### Data Storage
 - **Session data**: Stored locally as JSON (timestamps and event types only)
@@ -196,4 +199,3 @@ Edit `config.py` to customize:
 ## License
 
 MIT License - Feel free to use and modify for personal or educational purposes.
-

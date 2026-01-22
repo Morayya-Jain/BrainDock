@@ -92,9 +92,9 @@ These are controlled in `main.py` lines 27-35.
 ```python
 # In GUI app:
 if debug_mode:
-    logging.basicConfig(level=logging.DEBUG, filename='gavin_debug.log')
+    logging.basicConfig(level=logging.DEBUG, filename='braindock_debug.log')
 else:
-    logging.basicConfig(level=logging.ERROR, filename='gavin_errors.log')
+    logging.basicConfig(level=logging.ERROR, filename='braindock_errors.log')
 ```
 
 ---

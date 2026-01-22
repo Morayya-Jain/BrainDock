@@ -317,7 +317,7 @@ class WindowDetector:
                 "1. Open System Settings\n"
                 "2. Go to Privacy & Security > Accessibility\n"
                 "3. Click the + button and add this application\n"
-                "4. Restart Gavin AI"
+                "4. Restart BrainDock"
             )
         elif self.platform == "win32":
             return (

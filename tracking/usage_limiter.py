@@ -1,5 +1,5 @@
 """
-Usage Limiter for Gavin AI MVP.
+Usage Limiter for BrainDock MVP.
 
 Tracks cumulative usage time across sessions and enforces a time limit.
 Users can unlock additional time by entering a secret password.

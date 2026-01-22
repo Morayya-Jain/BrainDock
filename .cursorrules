@@ -1,8 +1,8 @@
-# Gavin AI - Cursor Rules
+# BrainDock - Cursor Rules
 
 ## Project Overview
 
-Gavin AI is an AI-powered study focus tracking application that monitors students via webcam, detects distractions (gadgets like phones, tablets, game controllers, etc.), and generates detailed PDF reports with AI-generated insights.
+BrainDock is an AI-powered study focus tracking application that monitors students via webcam, detects distractions (gadgets like phones, tablets, game controllers, etc.), and generates detailed PDF reports with AI-generated insights.
 
 **Tech Stack:**
 - Python 3.9+
@@ -39,7 +39,7 @@ Gavin AI is an AI-powered study focus tracking application that monitors student
 ## Project Structure
 
 ```
-gavin_ai/
+braindock/
 ├── main.py                    # Main entry point (GUI default, --cli for CLI)
 ├── config.py                  # All configuration constants
 ├── gui/
@@ -120,7 +120,7 @@ REPORTS_DIR = BASE_DIR / "reports"
 
 ### gui/app.py
 - Main desktop GUI application using tkinter
-- GavinGUI class manages the application window
+- BrainDockGUI class manages the application window
 - Features: Start/Stop button, status indicator, timer, report generation
 - Runs detection in separate thread for responsive UI
 - Uses thread-safe UI updates via root.after()

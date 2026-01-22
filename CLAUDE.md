@@ -1,8 +1,8 @@
-# Gavin AI - Agent Quick Reference
+# BrainDock - Agent Quick Reference
 
 **TL;DR**: Python focus tracker using OpenAI Vision API + screen monitoring to detect present/away/gadget/screen_distraction/paused states. Generates PDF reports.
 
-## 📁 Key Files
+## Key Files
 
 | File | Purpose |
 |------|---------|
@@ -17,14 +17,14 @@
 
 *Ignore: `detection.py`, `phone_detector.py` (legacy)*
 
-## ⚠️ Critical Rules
+## Critical Rules
 
 1. **Math Must Add Up**: `present + away + gadget + screen_distraction + paused = total` in `analytics.py`
 2. **AI-Only Detection** (Camera): OpenAI Vision API only (~$0.06-0.12/min)
 3. **Screen Detection**: Local pattern matching first, AI fallback optional
 4. **Time Format**: Use `_format_time()` → "1m 30s" not "1.5 minutes"
 
-## 📊 Event Types
+## Event Types
 
 - `present`: At desk, focused
 - `away`: Not visible or far from desk
@@ -32,18 +32,18 @@
 - `screen_distraction`: Distracting website/app detected (YouTube, Netflix, etc.)
 - `paused`: User manually paused session
 
-## 🖥️ Monitoring Modes
+## Monitoring Modes
 
 - `camera_only`: Default - camera detection only (backward compatible)
 - `screen_only`: Screen monitoring only (no API calls for camera)
 - `both`: Camera + screen monitoring (combined detection)
 
-## ⏸️ Pause & Alerts
+## Pause & Alerts
 
 - Pause: Timer freezes, no API calls. Focus rate = present/(total-paused)
 - Unfocused alerts: 20s → 60s → 120s, then stops until refocus
 
-## 🔧 Key Constants (config.py)
+## Key Constants (config.py)
 
 ```python
 DETECTION_FPS = 0.33              # ~3s between camera API calls
@@ -52,7 +52,7 @@ MODE_CAMERA_ONLY, MODE_SCREEN_ONLY, MODE_BOTH  # Monitoring modes
 OPENAI_VISION_MODEL = "gpt-4o-mini"
 ```
 
-## 🐛 Common Issues
+## Common Issues
 
 | Issue | Fix |
 |-------|-----|
@@ -60,12 +60,12 @@ OPENAI_VISION_MODEL = "gpt-4o-mini"
 | "Statistics don't add up" | Verify math in `analytics.py` |
 | "Gadget not detected" | Must be actively in use with person looking at it |
 
-## 🚫 What NOT to Do
+## What NOT to Do
 
-- ❌ Fallback detection (AI-only) | ❌ Save frames to disk (privacy) | ❌ Increase API frequency
-- ❌ Decimal minutes | ❌ Stats that don't sum | ❌ Run multiple instances
+- Fallback detection (AI-only) | Save frames to disk (privacy) | Increase API frequency
+- Decimal minutes | Stats that don't sum | Run multiple instances
 
-## 🔐 Setup & Test
+## Setup & Test
 
 ```bash
 # Required: .env with OPENAI_API_KEY=sk-...
@@ -74,7 +74,7 @@ python3 main.py  # GUI launches, check ~/Downloads/ for PDF
 python3 -m unittest tests.test_session tests.test_analytics
 ```
 
-## 📁 Data Files
+## Data Files
 
 - `data/focus_statements.json` - **REQUIRED** - PDF feedback templates (nested by distraction type)
   - Structure: `{category: {phone/away/screen/general: [statements]}, emojis: {...}}`
@@ -82,11 +82,11 @@ python3 -m unittest tests.test_session tests.test_analytics
 - `data/blocklist.json` - Screen monitoring blocklist (auto-created)
 - `data/usage_data.json` - Usage tracking (gitignored)
 
-## 🔄 Add New Detection Type
+## Add New Detection Type
 
 1. Add to `config.py` → 2. Handle in `session.py` → 3. Stats in `analytics.py` → 4. PDF in `pdf_report.py` → 5. GUI status color in `app.py`
 
-## 🖥️ Screen Monitoring & Blocklist
+## Screen Monitoring & Blocklist
 
 - Blocklist categories: Social Media, Video Streaming, Gaming (toggle in settings)
 - **Separate fields**: URLs (`custom_urls`) and Apps (`custom_apps`) in `screen/blocklist.py`
@@ -96,7 +96,7 @@ python3 -m unittest tests.test_session tests.test_analytics
 - **Self-cleaning**: Invalid patterns auto-removed at runtime in `check_distraction()`
 - Chrome URL detection: macOS (AppleScript), Windows (pywin32)
 
-## 📝 Code Standards
+## Code Standards
 
 Type hints required • Docstrings • `pathlib.Path` • Python 3.9+ • `logger.info()` internal, `print()` user-facing
 

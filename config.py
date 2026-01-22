@@ -1,4 +1,4 @@
-"""Configuration settings for Gavin AI."""
+"""Configuration settings for BrainDock."""
 
 import os
 from pathlib import Path

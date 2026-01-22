@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# AI Features Setup Script for Gavin AI
+# AI Features Setup Script for BrainDock
 
 clear
 echo "═══════════════════════════════════════════════════════"
-echo "🤖 Gavin AI - AI Features Setup"
+echo "🤖 BrainDock - AI Features Setup"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 
