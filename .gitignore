@@ -42,6 +42,7 @@ data/.braindock_instance.lock
 data/usage_data.json
 data/blocklist.json
 data/license.json
+data/daily_stats.json
 reports/
 *.log
 

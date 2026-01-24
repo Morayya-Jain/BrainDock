@@ -32,8 +32,9 @@ from camera.capture import CameraCapture
 from camera.vision_detector import VisionDetector
 from camera import get_event_type
 from tracking.session import Session
-from tracking.analytics import compute_statistics
+from tracking.analytics import compute_statistics, get_focus_percentage
 from tracking.usage_limiter import get_usage_limiter, UsageLimiter
+from tracking.daily_stats import get_daily_stats_tracker, DailyStatsTracker
 from reporting.pdf_report import generate_report
 from instance_lock import check_single_instance, get_existing_pid
 from screen.window_detector import WindowDetector, get_screen_state, get_screen_state_with_ai_fallback
@@ -45,18 +46,18 @@ logger = logging.getLogger(__name__)
 # Supports light/dark themes (dark mode prepared for future)
 THEMES = {
     "light": {
-        "bg_primary": "#FFFFFF",        # Main background (white)
-        "bg_secondary": "#F9FAFB",      # Card backgrounds (very light gray)
-        "bg_tertiary": "#F3F4F6",       # Hover states, borders
+        "bg_primary": "#F9F8F4",        # Warm Cream
+        "bg_secondary": "#FFFFFF",      # White Cards
+        "bg_tertiary": "#F2F0EB",       # Light beige for badges/accents
         "bg_card": "#FFFFFF",           # Card background
-        "text_primary": "#1F2937",      # Main text (dark gray)
-        "text_secondary": "#6B7280",    # Muted text (gray)
+        "text_primary": "#1C1C1E",      # Sharp Black
+        "text_secondary": "#8E8E93",    # System Gray
         "text_white": "#FFFFFF",        # White text for buttons
-        "border": "#9CA3AF",            # Visible borders (medium gray)
-        "border_focus": "#3B82F6",      # Focus ring color
-        "accent_primary": "#3B82F6",    # Primary accent (blue)
+        "border": "#E5E5EA",            # Visible borders
+        "border_focus": "#1C1C1E",      # Focus ring color
+        "accent_primary": "#2C3E50",    # Dark Blue/Grey
         "accent_warm": "#F59E0B",       # Warm accent for alerts
-        "status_focused": "#10B981",    # Green for focused
+        "status_focused": "#34C759",    # Subtle green for success
         "status_focused_bg": "#D1FAE5", # Light green background
         "status_away": "#F59E0B",       # Amber for away
         "status_away_bg": "#FEF3C7",    # Light amber background
@@ -64,25 +65,31 @@ THEMES = {
         "status_gadget_bg": "#FEE2E2",  # Light red background
         "status_screen": "#8B5CF6",     # Purple for screen distraction
         "status_screen_bg": "#EDE9FE",  # Light purple background
-        "status_idle": "#9CA3AF",       # Gray for idle
-        "status_paused": "#6B7280",     # Muted gray for paused
-        "button_start": "#10B981",      # Green start button
-        "button_start_hover": "#059669", # Darker green on hover
+        "status_idle": "#8E8E93",       # Gray for idle
+        "status_paused": "#8E8E93",     # Muted gray for paused
+        "button_start": "#1C1C1E",      # Black start button
+        "button_start_hover": "#2C3E50", # Dark Grey on hover
         "button_stop": "#EF4444",       # Red stop button
         "button_stop_hover": "#DC2626", # Darker red on hover
-        "button_pause": "#6B7280",      # Gray pause button
-        "button_pause_hover": "#4B5563", # Darker gray on hover
-        "button_resume": "#3B82F6",     # Blue resume button
-        "button_resume_hover": "#2563EB", # Darker blue on hover
-        "button_settings": "#6B7280",   # Gray for settings
-        "button_settings_hover": "#4B5563", # Darker gray on hover
+        "button_pause": "#8E8E93",      # Gray pause button
+        "button_pause_hover": "#6B7280", # Darker gray on hover
+        "button_resume": "#2C3E50",     # Dark Blue resume button
+        "button_resume_hover": "#3B82F6", # Blue on hover
+        "button_settings": "#8E8E93",   # Gray for settings
+        "button_settings_hover": "#6B7280", # Darker gray on hover
         "time_badge": "#8B5CF6",        # Purple for time remaining
         "time_badge_low": "#F59E0B",    # Orange when time is low
         "time_badge_expired": "#EF4444", # Red when time expired
-        "toggle_on": "#3B82F6",         # Blue for enabled toggles
-        "toggle_off": "#E5E7EB",        # Light gray for disabled toggles
+        "toggle_on": "#2C3E50",         # Dark Blue for enabled toggles
+        "toggle_off": "#E5E5EA",        # Light gray for disabled toggles
         "toggle_text_on": "#FFFFFF",    # White text when toggle on
-        "toggle_text_off": "#6B7280",   # Gray text when toggle off
+        "toggle_text_off": "#8E8E93",   # Gray text when toggle off
+        
+        # New Seraphic Colors
+        "shadow_light": "#E5E5EA", 
+        "shadow_lighter": "#F2F2F7",
+        "badge_bg": "#F2F0EB",
+        "badge_text": "#2C3E50"
     },
     # Dark theme prepared for future implementation
     "dark": {
@@ -144,405 +151,329 @@ PRIVACY_FILE = Path(__file__).parent.parent / "data" / ".privacy_accepted"
 ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 # Base dimensions for scaling (larger default window)
-BASE_WIDTH = 900
-BASE_HEIGHT = 700
+BASE_WIDTH = 1300
+BASE_HEIGHT = 950
 MIN_WIDTH = 600
 MIN_HEIGHT = 500
 
 
-class RoundedFrame(tk.Canvas):
+# --- Font System with Fallback ---
+# Primary font is SF Pro Display (macOS). Fallbacks are similar-looking sans-serif fonts.
+# Font priority order: SF Pro Display > Segoe UI (Windows) > Helvetica Neue > Helvetica > Arial
+_available_fonts_cache = None
+
+def _get_available_fonts():
     """
-    A frame with rounded corners using Canvas.
+    Get list of available font families on the system.
+    Results are cached for performance.
     
-    Draws a rounded rectangle background and allows placing widgets inside.
-    Supports optional border for light theme styling.
+    Returns:
+        Set of lowercase font family names available on the system.
     """
+    global _available_fonts_cache
+    if _available_fonts_cache is None:
+        try:
+            # Create a temporary root if needed to access font families
+            temp_root = None
+            try:
+                # Try to get existing Tk instance
+                root = tk._default_root
+                if root is None:
+                    temp_root = tk.Tk()
+                    temp_root.withdraw()
+                    root = temp_root
+                _available_fonts_cache = {f.lower() for f in tkfont.families()}
+            finally:
+                if temp_root:
+                    temp_root.destroy()
+        except Exception:
+            _available_fonts_cache = set()
+    return _available_fonts_cache
+
+
+def get_system_font(size: int = 11, weight: str = "normal") -> tuple:
+    """
+    Get the best available system font with fallback.
     
-    def __init__(self, parent, bg_color: str, corner_radius: int = 15, 
-                 border_color: str = None, border_width: int = 1, **kwargs):
-        """
-        Initialize rounded frame.
-        
-        Args:
-            parent: Parent widget
-            bg_color: Background color for the rounded rectangle
-            corner_radius: Radius of the corners
-            border_color: Optional border color (None for no border)
-            border_width: Border width in pixels
-        """
-        # Get parent background for canvas
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
-        
-        super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
-        
-        self.bg_color = bg_color
-        self.corner_radius = corner_radius
-        self.border_color = border_color
-        self.border_width = border_width
-        self._rect_id = None
-        
-        # Bind resize to redraw
-        self.bind("<Configure>", self._on_resize)
+    Primary font is SF Pro Display (macOS). Falls back to similar-looking
+    sans-serif fonts on other platforms (Segoe UI on Windows, then Helvetica).
     
-    def _on_resize(self, event=None):
-        """Redraw the rounded rectangle on resize."""
-        self.delete("rounded_bg")
-        self.delete("rounded_border")
+    Args:
+        size: Font size in points
+        weight: Font weight ("normal" or "bold")
         
-        width = self.winfo_width()
-        height = self.winfo_height()
-        
-        if width > 1 and height > 1:
-            self._draw_rounded_rect(0, 0, width, height, self.corner_radius, self.bg_color)
+    Returns:
+        Tuple of (font_family, size, weight) suitable for tkinter
+    """
+    # Font priority order - SF Pro Display and similar modern sans-serif fonts
+    font_priority = [
+        "SF Pro Display",      # macOS primary
+        "SF Pro Text",         # macOS alternative
+        ".SF NS Text",         # macOS system font variant
+        "Segoe UI",            # Windows primary (very similar to SF Pro)
+        "Helvetica Neue",      # Cross-platform, similar style
+        "Helvetica",           # Universal fallback
+        "Arial",               # Ultimate fallback (available everywhere)
+    ]
     
-    def _draw_rounded_rect(self, x1, y1, x2, y2, radius, color):
-        """
-        Draw a rounded rectangle with optional border.
-        
-        Args:
-            x1, y1: Top-left corner
-            x2, y2: Bottom-right corner
-            radius: Corner radius
-            color: Fill color
-        """
-        # Ensure radius isn't larger than half the smallest dimension
-        radius = min(radius, (x2 - x1) // 2, (y2 - y1) // 2)
-        
-        # Draw using polygon with smooth curves
-        points = [
-            x1 + radius, y1,
-            x2 - radius, y1,
-            x2, y1,
-            x2, y1 + radius,
-            x2, y2 - radius,
-            x2, y2,
-            x2 - radius, y2,
-            x1 + radius, y2,
-            x1, y2,
-            x1, y2 - radius,
-            x1, y1 + radius,
-            x1, y1,
-        ]
-        
-        # Draw border first if specified
-        if self.border_color:
-            self.create_polygon(
-                points,
-                fill="",
-                outline=self.border_color,
-                width=self.border_width,
-                smooth=True,
-                tags="rounded_border"
-            )
-        
-        self._rect_id = self.create_polygon(
-            points, 
-            fill=color, 
-            smooth=True, 
-            tags="rounded_bg"
-        )
-        
-        # Send to back so widgets appear on top
-        self.tag_lower("rounded_bg")
+    available = _get_available_fonts()
+    
+    for font_name in font_priority:
+        if font_name.lower() in available:
+            return (font_name, size, weight)
+    
+    # If nothing found, return Helvetica (tkinter default)
+    return ("Helvetica", size, weight)
 
 
 class RoundedButton(tk.Canvas):
-    """
-    A button with rounded corners.
-    """
-    
-    def __init__(
-        self, 
-        parent, 
-        text: str,
-        command,
-        bg_color: str,
-        hover_color: str,
-        fg_color: str = "#FFFFFF",
-        font: tkfont.Font = None,
-        corner_radius: int = 12,
-        padx: int = 30,
-        pady: int = 12,
-        **kwargs
-    ):
-        """
-        Initialize rounded button.
-        
-        Args:
-            parent: Parent widget
-            text: Button text
-            command: Click callback
-            bg_color: Background color
-            hover_color: Color on hover
-            fg_color: Text color
-            font: Text font
-            corner_radius: Corner radius
-            padx, pady: Internal padding
-        """
-        self.text = text
-        self.command = command
-        self.bg_color = bg_color
-        self.hover_color = hover_color
-        self.fg_color = fg_color
-        self.btn_font = font
-        self.corner_radius = corner_radius
-        self.padx = padx
-        self.pady = pady
-        self._enabled = True
-        
-        # Get parent background
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
-        
-        super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
-        
-        # Bind events
-        self.bind("<Configure>", self._on_resize)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self.bind("<Button-1>", self._on_click)
-        
-        self._current_bg = bg_color
-    
-    def _on_resize(self, event=None):
-        """Redraw button on resize."""
-        self._draw_button()
-    
-    def _draw_button(self):
-        """Draw the button with current state."""
-        self.delete("all")
-        
-        width = self.winfo_width()
-        height = self.winfo_height()
-        
-        if width > 1 and height > 1:
-            # Draw rounded rectangle background
-            radius = min(self.corner_radius, width // 4, height // 2)
-            
-            points = [
-                radius, 0,
-                width - radius, 0,
-                width, 0,
-                width, radius,
-                width, height - radius,
-                width, height,
-                width - radius, height,
-                radius, height,
-                0, height,
-                0, height - radius,
-                0, radius,
-                0, 0,
-            ]
-            
-            self.create_polygon(
-                points,
-                fill=self._current_bg,
-                smooth=True,
-                tags="bg"
-            )
-            
-            # Draw text
-            self.create_text(
-                width // 2,
-                height // 2,
-                text=self.text,
-                fill=self.fg_color,
-                font=self.btn_font,
-                tags="text"
-            )
-    
-    def _on_enter(self, event):
-        """Mouse enter - show hover state."""
-        if self._enabled:
-            self._current_bg = self.hover_color
-            self._draw_button()
-            self.config(cursor="")  # Normal cursor
-    
-    def _on_leave(self, event):
-        """Mouse leave - restore normal state."""
-        if self._enabled:
-            self._current_bg = self.bg_color
-            self._draw_button()
-    
-    def _on_click(self, event):
-        """Handle click."""
-        if self._enabled and self.command:
-            self.command()
-    
-    def configure_button(self, **kwargs):
-        """
-        Configure button properties.
-        
-        Args:
-            text: New button text
-            bg_color: New background color
-            hover_color: New hover color
-            state: tk.NORMAL or tk.DISABLED
-        """
-        if "text" in kwargs:
-            self.text = kwargs["text"]
-        if "bg_color" in kwargs:
-            self.bg_color = kwargs["bg_color"]
-            self._current_bg = kwargs["bg_color"]
-        if "hover_color" in kwargs:
-            self.hover_color = kwargs["hover_color"]
-        if "state" in kwargs:
-            self._enabled = (kwargs["state"] != tk.DISABLED)
-            if not self._enabled:
-                self._current_bg = COLORS["bg_tertiary"]
-            else:
-                self._current_bg = self.bg_color
-        
-        self._draw_button()
+    """Rounded, soft-shadow button for Seraphic theme."""
 
-
-class RoundedBadge(tk.Canvas):
-    """
-    A non-interactive badge with rounded corners.
-    
-    Used for displaying status information like time remaining.
-    Supports dynamic text and background color updates.
-    """
-    
     def __init__(
         self,
         parent,
-        text: str,
-        bg_color: str,
-        fg_color: str = "#FFFFFF",
-        font: tkfont.Font = None,
-        corner_radius: int = 10,
-        padx: int = 16,
-        pady: int = 6,
-        clickable: bool = False,
-        hover_color: str = None,
+        text,
+        command=None,
+        width=200,
+        height=50,
+        radius=25,
+        bg_color=None,
+        hover_color=None,
+        fg_color=None,
+        text_color=None,
+        font=None,
+        font_type=None,
+        corner_radius=None,
+        padx=30,
+        pady=12,
         **kwargs
     ):
-        """
-        Initialize rounded badge.
+        """Initialize the button with optional hover and disabled states."""
+        # Discard legacy args that shouldn't reach Canvas
+        _ = font_type  # Legacy support, intentionally unused
+        kwargs.pop("font_type", None)
+
+        # Defaults
+        bg_color = bg_color or COLORS["button_start"]
+        hover_color = hover_color or bg_color
+        fg_color = fg_color or text_color or COLORS["text_white"]
+        corner_radius = corner_radius or radius
+
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
+        super().__init__(parent, width=width, height=height, bg=parent_bg, highlightthickness=0, **kwargs)
+
+        self.command = command
+        self.radius = corner_radius
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        self.text_color = fg_color
+        self.text_str = text
+        self.font_obj = font
+        self._enabled = True
+
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Configure>", self._on_resize)
+
+        self.draw()
+
+    def _on_resize(self, event):
+        """Redraw on resize."""
+        self.draw()
+
+    def draw(self, offset=0):
+        """Render the button body, shadow, and label."""
+        self.delete("all")
+        w = self.winfo_width() or int(self["width"])
+        h = self.winfo_height() or int(self["height"])
+
+        x1, y1 = 2, 2 + offset
+        x2, y2 = w - 2, h - 2 + offset
+        r = min(self.radius, h / 2)
+
+        if offset == 0:
+            self.create_rounded_rect(x1 + 2, y1 + 4, x2 + 2, y2 + 4, r, fill=COLORS.get("shadow_light", "#E5E5EA"), outline="")
+
+        self.create_rounded_rect(x1, y1, x2, y2, r, fill=self.bg_color, outline=self.bg_color)
+
+        font_to_use = self.font_obj or ("Helvetica", 14, "bold")
+        self.create_text(w // 2, h // 2 + offset, text=self.text_str, fill=self.text_color, font=font_to_use)
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        """Draw a rounded rectangle polygon."""
+        points = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+    def _on_click(self, event):
+        """Handle click when enabled."""
+        if self._enabled and self.command:
+            self.command()
+            self.draw(offset=2)
+            self.after(100, lambda: self.draw(offset=0))
+
+    def _on_enter(self, event):
+        """Apply hover color."""
+        self.config(cursor="")
+        if self._enabled:
+            self._original_bg = self.bg_color
+            self.bg_color = self.hover_color
+            self.draw()
+
+    def _on_leave(self, event):
+        """Restore normal color."""
+        self.config(cursor="")
+        if self._enabled and hasattr(self, "_original_bg"):
+            self.bg_color = self._original_bg
+            self.draw()
+
+    def configure(self, **kwargs):
+        """Update button properties and redraw."""
+        if "text" in kwargs:
+            self.text_str = kwargs.pop("text")
+        if "bg_color" in kwargs:
+            self.bg_color = kwargs.pop("bg_color")
+        if "hover_color" in kwargs:
+            self.hover_color = kwargs.pop("hover_color")
+        if "text_color" in kwargs:
+            self.text_color = kwargs.pop("text_color")
+        if "fg_color" in kwargs:
+            self.text_color = kwargs.pop("fg_color")
+        if "state" in kwargs:
+            self._enabled = kwargs.pop("state") != tk.DISABLED
+            if not self._enabled:
+                self.bg_color = COLORS["bg_tertiary"]
+        super().configure(**kwargs)
+        self.draw()
+
+
+class Card(tk.Canvas):
+    """Rounded card container with soft shadow."""
+
+    def __init__(self, parent, width=300, height=150, radius=20, bg_color=None, text=None, text_color=None, font=None):
+        """Initialize the card surface."""
+        bg_color = bg_color or COLORS["bg_secondary"]
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
+        super().__init__(parent, width=width, height=height, bg=parent_bg, highlightthickness=0)
+        self.radius = radius
+        self.bg_color = bg_color
+        self.text = text
+        self.text_color = text_color
+        self.font = font
+        self.bind("<Configure>", self._on_resize)
+        self.draw()
+
+    def _on_resize(self, event):
+        """Redraw on resize."""
+        self.draw()
+
+    def draw(self):
+        """Render shadow and card surface."""
+        # Only delete our internal elements (tagged)
+        self.delete("card_bg")
+        self.delete("card_text")
         
-        Args:
-            parent: Parent widget
-            text: Badge text
-            bg_color: Background color
-            fg_color: Text color
-            font: Text font
-            corner_radius: Corner radius
-            padx, pady: Internal padding
-            clickable: Whether badge responds to clicks
-            hover_color: Color on hover (only if clickable)
-        """
+        w = self.winfo_width() or int(self["width"])
+        h = self.winfo_height() or int(self["height"])
+        r = self.radius
+        
+        # Draw background with tag "card_bg"
+        self.create_rounded_rect(4, 8, w - 4, h - 4, r, fill=COLORS.get("shadow_lighter", "#F2F2F7"), outline="", tags="card_bg")
+        self.create_rounded_rect(2, 2, w - 6, h - 6, r, fill=self.bg_color, outline=COLORS.get("shadow_lighter", "#F2F2F7"), tags="card_bg")
+        
+        # Ensure background is at the bottom so it doesn't cover external items
+        self.tag_lower("card_bg")
+        
+        if self.text:
+            font_to_use = self.font or ("Helvetica", 12, "bold")
+            fill_color = self.text_color or COLORS["text_primary"]
+            self.create_text(w // 2, h // 2, text=self.text, fill=fill_color, font=font_to_use, tags="card_text")
+
+    def configure_card(self, text=None, bg_color=None, text_color=None):
+        """Update card styling and text."""
+        if text is not None:
+            self.text = text
+        if bg_color is not None:
+            self.bg_color = bg_color
+        if text_color is not None:
+            self.text_color = text_color
+        self.draw()
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        """Draw a rounded rectangle polygon."""
+        points = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+
+class Badge(tk.Canvas):
+    """Rounded badge for status and time remaining."""
+
+    def __init__(
+        self,
+        parent,
+        text,
+        bg_color=None,
+        text_color=None,
+        font=None,
+        corner_radius=18,
+        clickable=False,
+        width=120,
+        height=36,
+        fg_color=None
+    ):
+        """Initialize the badge surface."""
+        bg_color = bg_color or COLORS.get("badge_bg", "#F2F0EB")
+        text_color = text_color or fg_color or COLORS.get("badge_text", "#2C3E50")
+        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
+        super().__init__(parent, width=width, height=height, bg=parent_bg, highlightthickness=0)
         self.text = text
         self.bg_color = bg_color
-        self.fg_color = fg_color
-        self.badge_font = font
+        self.text_color = text_color
+        self.font = font
         self.corner_radius = corner_radius
-        self.padx = padx
-        self.pady = pady
         self.clickable = clickable
-        self.hover_color = hover_color or bg_color
-        self._current_bg = bg_color
-        self._click_callback = None
-        
-        # Get parent background
-        parent_bg = parent.cget("bg") if hasattr(parent, "cget") else COLORS["bg_primary"]
-        
-        super().__init__(parent, highlightthickness=0, bg=parent_bg, **kwargs)
-        
-        # Bind resize
-        self.bind("<Configure>", self._on_resize)
-        
-        # Bind hover/click if clickable
-        if clickable:
-            self.bind("<Enter>", self._on_enter)
-            self.bind("<Leave>", self._on_leave)
-            self.bind("<Button-1>", self._on_click)
-    
-    def _on_resize(self, event=None):
-        """Redraw badge on resize."""
-        self._draw_badge()
-    
-    def _draw_badge(self):
-        """Draw the badge with current state."""
+        self.draw()
+        if self.clickable:
+            self.bind("<Enter>", lambda e: self.config(cursor=""))
+            self.bind("<Leave>", lambda e: self.config(cursor=""))
+
+    def draw(self):
+        """Render the badge background and label."""
         self.delete("all")
-        
-        width = self.winfo_width()
-        height = self.winfo_height()
-        
-        if width > 1 and height > 1:
-            # Draw rounded rectangle background
-            radius = min(self.corner_radius, width // 4, height // 2)
-            
-            points = [
-                radius, 0,
-                width - radius, 0,
-                width, 0,
-                width, radius,
-                width, height - radius,
-                width, height,
-                width - radius, height,
-                radius, height,
-                0, height,
-                0, height - radius,
-                0, radius,
-                0, 0,
-            ]
-            
-            self.create_polygon(
-                points,
-                fill=self._current_bg,
-                smooth=True,
-                tags="bg"
-            )
-            
-            # Draw text
-            self.create_text(
-                width // 2,
-                height // 2,
-                text=self.text,
-                fill=self.fg_color,
-                font=self.badge_font,
-                tags="text"
-            )
-    
-    def _on_enter(self, event):
-        """Mouse enter - show hover state."""
-        if self.clickable:
-            self._current_bg = self.hover_color
-            self._draw_badge()
-    
-    def _on_leave(self, event):
-        """Mouse leave - restore normal state."""
-        if self.clickable:
-            self._current_bg = self.bg_color
-            self._draw_badge()
-    
-    def _on_click(self, event):
-        """Handle click."""
-        if self.clickable and self._click_callback:
-            self._click_callback(event)
-    
+        w = int(self["width"])
+        h = int(self["height"])
+        self.create_rounded_rect(2, 2, w - 2, h - 2, self.corner_radius, fill=self.bg_color, outline="")
+        font_to_use = self.font or ("Helvetica", 12, "bold")
+        self.create_text(w // 2, h // 2, text=self.text, fill=self.text_color, font=font_to_use)
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        """Draw a rounded rectangle polygon."""
+        points = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+        return self.create_polygon(points, smooth=True, **kwargs)
+
+    def configure_badge(self, text=None, bg_color=None, fg_color=None):
+        """Update badge styling and text."""
+        if text:
+            self.text = text
+        if bg_color:
+            self.bg_color = bg_color
+        if fg_color:
+            self.text_color = fg_color
+        self.draw()
+
     def bind_click(self, callback):
-        """Bind a callback to badge click."""
-        self._click_callback = callback
-    
-    def configure_badge(self, **kwargs):
-        """
-        Configure badge properties.
-        
-        Args:
-            text: New badge text
-            bg_color: New background color
-            fg_color: New text color
-        """
+        """Bind a click handler to the badge."""
+        self.bind("<Button-1>", lambda e: callback())
+
+    def configure(self, **kwargs):
+        """Allow text updates via configure."""
         if "text" in kwargs:
-            self.text = kwargs["text"]
-        if "bg_color" in kwargs:
-            self.bg_color = kwargs["bg_color"]
-            self._current_bg = kwargs["bg_color"]
-        if "fg_color" in kwargs:
-            self.fg_color = kwargs["fg_color"]
-        
-        self._draw_badge()
+            self.text = kwargs.pop("text")
+            self.draw()
+        super().configure(**kwargs)
+
+# Alias Badge to RoundedBadge for compatibility if needed, but we updated usage
+RoundedBadge = Badge
 
 
 class Tooltip:
@@ -550,6 +481,7 @@ class Tooltip:
     A tooltip that appears when hovering over a widget.
     
     Shows full text on hover, similar to browser tab tooltips.
+    Uses SF Pro Display on macOS with fallback to similar fonts on other platforms.
     """
     
     def __init__(self, widget, text: str = "", bg: str = "#1E293B", fg: str = "#F1F5F9"):
@@ -601,12 +533,15 @@ class Tooltip:
         frame = tk.Frame(self.tooltip_window, bg=self.bg, bd=1, relief="solid")
         frame.pack()
         
+        # Use system font with fallback (SF Pro Display > Segoe UI > Helvetica)
+        tooltip_font = get_system_font(size=11, weight="normal")
+        
         label = tk.Label(
             frame,
             text=self.text,
             bg=self.bg,
             fg=self.fg,
-            font=("SF Pro Display", 11),
+            font=tooltip_font,
             padx=8,
             pady=4,
             wraplength=400,  # Wrap long text
@@ -639,9 +574,9 @@ class NotificationPopup:
     # Class-level reference to track active popup (only one at a time)
     _active_popup: Optional['NotificationPopup'] = None
     
-    # Consistent font family for the app
-    FONT_FAMILY = "SF Pro Display"
-    FONT_FAMILY_FALLBACK = "Helvetica Neue"
+    # Consistent font family for the app (Seraphic theme)
+    FONT_FAMILY = "Georgia"
+    FONT_FAMILY_FALLBACK = "Times New Roman"
     
     def __init__(
         self, 
@@ -1086,6 +1021,10 @@ class BrainDockGUI:
         self.total_paused_seconds: float = 0.0  # Accumulated pause time in session (float for precision)
         self.frozen_active_seconds: int = 0  # Frozen timer display value when paused
         
+        # Distraction counters for stats
+        self.gadget_detection_count = 0
+        self.screen_distraction_count = 0
+        
         # Unfocused alert tracking
         self.unfocused_start_time: Optional[float] = None
         self.alerts_played: int = 0  # Tracks how many alerts have been played (max 3)
@@ -1093,6 +1032,9 @@ class BrainDockGUI:
         # Usage limit tracking
         self.usage_limiter: UsageLimiter = get_usage_limiter()
         self.is_locked: bool = False  # True when time exhausted and app is locked
+        
+        # Daily stats tracking (accumulates across sessions, resets at midnight)
+        self.daily_stats: DailyStatsTracker = get_daily_stats_tracker()
         
         # UI update lock
         self.ui_lock = threading.Lock()
@@ -1154,32 +1096,44 @@ class BrainDockGUI:
     
     def _create_fonts(self):
         """Create custom fonts for the UI with fixed sizes."""
-        # Use SF Pro Display for consistent modern look (fallback to Helvetica Neue)
-        font_family = "SF Pro Display"
-        font_family_mono = "SF Mono"
+        # Seraphic Design Fonts
+        font_display = "Georgia"
+        font_interface = "Helvetica"
         
         self.font_title = tkfont.Font(
-            family=font_family, size=26, weight="bold"
+            family=font_display, size=24, weight="bold"
+        )
+        
+        self.font_stat = tkfont.Font(
+            family=font_display, size=28, weight="bold"
         )
         
         self.font_timer = tkfont.Font(
-            family=font_family_mono, size=36, weight="bold"
+            family=font_display, size=64, weight="bold"
         )
         
         self.font_status = tkfont.Font(
-            family=font_family, size=20, weight="normal"
+            family=font_interface, size=24, weight="bold"
         )
         
         self.font_button = tkfont.Font(
-            family=font_family, size=14, weight="bold"
+            family=font_interface, size=14, weight="bold"
         )
         
         self.font_small = tkfont.Font(
-            family=font_family, size=11, weight="normal"
+            family=font_interface, size=12, weight="normal"
         )
         
         self.font_badge = tkfont.Font(
-            family=font_family, size=10, weight="bold"
+            family=font_interface, size=12, weight="bold"
+        )
+        
+        self.font_caption = tkfont.Font(
+            family=font_interface, size=12, weight="bold"
+        )
+        
+        self.font_body = tkfont.Font(
+            family=font_interface, size=14, weight="normal"
         )
     
     
@@ -1213,16 +1167,14 @@ class BrainDockGUI:
             self.current_scale = new_scale
             
             # Scale buttons proportionally (but keep minimum size)
-            new_btn_width = max(160, int(180 * new_scale))
-            new_btn_height = max(46, int(52 * new_scale))
+            new_btn_width = max(160, int(240 * new_scale))
+            new_btn_height = max(46, int(64 * new_scale))
             
             if hasattr(self, 'start_stop_btn'):
                 self.start_stop_btn.configure(width=new_btn_width, height=new_btn_height)
-                self.start_stop_btn._draw_button()
             
             if hasattr(self, 'pause_btn'):
                 self.pause_btn.configure(width=new_btn_width, height=new_btn_height)
-                self.pause_btn._draw_button()
     
     def _get_current_status_color(self) -> str:
         """Get the color for the current status."""
@@ -1252,215 +1204,460 @@ class BrainDockGUI:
     
     def _create_widgets(self):
         """Create all UI widgets with scalable layout."""
-        # --- Header Section (Logo left, Timer right) - positioned at top with minimal padding ---
+        # --- Header (Directly in root for corner positioning) ---
         header_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
-        header_frame.pack(fill=tk.X, padx=20, pady=(20, 0))
-        
-        # Main container using grid for proportional spacing
-        self.main_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
-        self.main_frame.pack(fill=tk.BOTH, expand=True, padx=50, pady=(20, 40))
-        
-        # Configure grid rows with weights for proportional expansion
-        # Row 0: Spacer (expands)
-        # Row 1: (was Title, now empty)
-        # Row 2: Spacer (expands)
-        # Row 3: Status card (fixed)
-        # Row 4: Spacer (expands more)
-        # Row 5: Timer (fixed)
-        # Row 6: Spacer (expands more)
-        # Row 7: Button (fixed)
-        # Row 8: Spacer (expands)
-        
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(0, minsize=10, weight=1)   # Top spacer
-        self.main_frame.grid_rowconfigure(1, weight=0)   # (empty)
-        self.main_frame.grid_rowconfigure(2, weight=1)   # Spacer
-        self.main_frame.grid_rowconfigure(8, weight=0)   # Mode selector (added)
-        self.main_frame.grid_rowconfigure(3, weight=0)   # Status
-        self.main_frame.grid_rowconfigure(4, weight=2)   # Spacer (more weight)
-        self.main_frame.grid_rowconfigure(5, weight=0)   # Timer
-        self.main_frame.grid_rowconfigure(6, weight=2)   # Spacer (more weight)
-        self.main_frame.grid_rowconfigure(7, weight=0)   # Button
-        self.main_frame.grid_rowconfigure(8, weight=1)   # Bottom spacer
-        
-        # Logo container (left aligned)
+        # Reduced padding to move elements closer to corners
+        header_frame.pack(fill=tk.X, padx=20, pady=20, side=tk.TOP)
+
+        # Logo (Left)
         logo_frame = tk.Frame(header_frame, bg=COLORS["bg_primary"])
-        logo_frame.pack(side=tk.LEFT, anchor="nw")
+        logo_frame.pack(side=tk.LEFT, anchor="nw", padx=(0, 0))
         
-        # Load and display logo with text (combined image)
-        self.logo_image = None
-        self.logo_label = None
         if PIL_AVAILABLE:
             logo_path = ASSETS_DIR / "logo_with_text.png"
             if logo_path.exists():
                 try:
-                    # Load logo with text
                     img = Image.open(logo_path)
-                    
-                    # Convert to RGBA if not already (for proper transparency handling)
                     if img.mode != 'RGBA':
                         img = img.convert('RGBA')
                     
-                    # Crop out empty/transparent space around the logo
-                    bbox = img.getbbox()
-                    if bbox:
-                        img = img.crop(bbox)
-                    
-                    # Resize proportionally - smaller height of 28px
-                    target_height = 28
-                    aspect_ratio = img.width / img.height
-                    target_width = int(target_height * aspect_ratio)
+                    # Resize keeping aspect ratio (height 32 - smaller for corner)
+                    aspect = img.width / img.height
+                    target_height = 32
+                    target_width = int(target_height * aspect)
                     img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                    
                     self.logo_image = ImageTk.PhotoImage(img)
-                    self.logo_label = tk.Label(
-                        logo_frame,
-                        image=self.logo_image,
-                        bg=COLORS["bg_primary"]
-                    )
-                    self.logo_label.pack(anchor="w")
+                    self.logo_label = tk.Label(header_frame, image=self.logo_image, bg=COLORS["bg_primary"])
+                    self.logo_label.pack(side=tk.LEFT)
                 except Exception as e:
                     logger.warning(f"Could not load logo: {e}")
-                    # Fallback to text-only title
-                    self.title_label = tk.Label(
-                        logo_frame,
-                        text="BrainDock",
-                        font=self.font_title,
-                        fg=COLORS["text_primary"],
-                        bg=COLORS["bg_primary"]
-                    )
-                    self.title_label.pack(anchor="w")
+                    tk.Label(header_frame, text="BrainDock", font=self.font_title, bg=COLORS["bg_primary"], fg=COLORS["text_primary"]).pack(side=tk.LEFT)
             else:
-                # Fallback to text-only title if image not found
-                self.title_label = tk.Label(
-                    logo_frame,
-                    text="BrainDock",
-                    font=self.font_title,
-                    fg=COLORS["text_primary"],
-                    bg=COLORS["bg_primary"]
-                )
-                self.title_label.pack(anchor="w")
+                tk.Label(header_frame, text="BrainDock", font=self.font_title, bg=COLORS["bg_primary"], fg=COLORS["text_primary"]).pack(side=tk.LEFT)
         else:
-            # Fallback to text-only title if PIL not available
-            self.title_label = tk.Label(
-                logo_frame,
-                text="BrainDock",
-                font=self.font_title,
-                fg=COLORS["text_primary"],
-                bg=COLORS["bg_primary"]
-            )
-            self.title_label.pack(anchor="w")
-        
-        # --- Time Remaining Badge (right aligned) ---
-        self.time_badge_frame = tk.Frame(header_frame, bg=COLORS["bg_primary"])
-        self.time_badge_frame.pack(side=tk.RIGHT, anchor="ne")
-        
-        # Rounded badge for time remaining - compact style
-        self.time_badge = RoundedBadge(
-            self.time_badge_frame,
-            text="2h 0m left",
-            bg_color=COLORS["bg_secondary"],
-            hover_color=COLORS["bg_tertiary"],
-            fg_color=COLORS["text_secondary"],
-            font=self.font_badge,
-            corner_radius=6,
-            padx=12,
-            pady=4,
-            clickable=True,
-            width=95,
-            height=28
-        )
-        self.time_badge.pack()
+            tk.Label(header_frame, text="BrainDock", font=self.font_title, bg=COLORS["bg_primary"], fg=COLORS["text_primary"]).pack(side=tk.LEFT)
+
+        # Usage Badge (Right)
+        # We'll create it here but update it later
+        self.time_badge = Badge(header_frame, text="Loading...", bg_color=COLORS["bg_tertiary"], fg_color=COLORS["text_secondary"], font=self.font_badge, clickable=True)
+        self.time_badge.pack(side=tk.RIGHT, anchor="ne")
         self.time_badge.bind_click(self._show_usage_details)
+
+        # --- Main Container ---
+        # Using a frame that expands to fill space between header and footer
+        main_container = tk.Frame(self.root, bg=COLORS["bg_primary"])
+        main_container.pack(expand=True, fill="both", padx=40)
+        # Keep legacy reference for overlays
+        self.main_frame = main_container
+
+        # Content Centering Frame
+        self.content_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
+        self.content_frame.place(relx=0.5, rely=0.55, anchor="center")
+
+        # --- Split Layout ---
+        # Left Panel: Stats (Hidden during session)
+        self.stats_container = tk.Frame(self.content_frame, bg=COLORS["bg_primary"])
+        self.stats_container.pack(side=tk.LEFT, padx=(0, 40), anchor="n")
         
-        # Lockout overlay (hidden by default)
-        self.lockout_frame: Optional[tk.Frame] = None
+        # Right Panel: Controls (Always visible, centers when stats hidden)
+        self.controls_container = tk.Frame(self.content_frame, bg=COLORS["bg_primary"])
+        self.controls_container.pack(side=tk.LEFT, anchor="n")
+
+        # Initialize stat cards dictionary
+        self.stat_cards = {}
+
+        # Create structured stat cards in Left Panel (Vertical Stack)
+        # Order: Focus, Distractions, Rate (at bottom)
+        self._create_stat_card(self.stats_container, 0, "focus")
+        self._create_stat_card(self.stats_container, 0, "distractions")
+        self._create_stat_card(self.stats_container, 0, "rate")
         
-        # --- Status Badge (Pill style) ---
-        status_badge_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
-        status_badge_frame.grid(row=3, column=0, pady=(10, 0))
+        # Initialize stat cards with today's accumulated values
+        self._init_daily_stat_cards()
+
+        # --- Controls Panel Content ---
         
-        # Status badge - compact pill style with slightly grey background
-        self.status_badge = RoundedBadge(
-            status_badge_frame,
-            text="● Ready to Start",
+        # Camera Preview Card
+        camera_container = tk.Frame(self.controls_container, bg=COLORS["bg_primary"])
+        camera_container.pack(pady=(0, 40))
+        
+        # Camera card now acts as the status display
+        self.camera_card = Card(
+            camera_container, 
+            width=400, 
+            height=240, 
             bg_color=COLORS["bg_tertiary"],
-            fg_color=COLORS["status_idle"],
-            font=self.font_status,
-            corner_radius=10,
-            padx=28,
-            pady=10
+            text="Ready to Start",
+            text_color=COLORS["status_idle"],
+            font=self.font_status
         )
-        self.status_badge.pack()
+        self.camera_card.pack()
         
-        # --- Timer Display ---
-        timer_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
-        timer_frame.grid(row=5, column=0, sticky="ew")
-        
-        self.timer_label = tk.Label(
-            timer_frame,
-            text="00:00:00",
-            font=self.font_timer,
-            fg=COLORS["text_primary"],
-            bg=COLORS["bg_primary"]
-        )
+        # Timer Section
+        timer_frame = tk.Frame(self.controls_container, bg=COLORS["bg_primary"])
+        timer_frame.pack(pady=(0, 10))
+
+        self.timer_label = tk.Label(timer_frame, text="00:00:00", font=self.font_timer, bg=COLORS["bg_primary"], fg=COLORS["text_primary"])
         self.timer_label.pack()
         
         self.timer_sub_label = tk.Label(
             timer_frame,
             text="Session Duration",
-            font=self.font_small,
-            fg=COLORS["text_secondary"],
-            bg=COLORS["bg_primary"]
+            font=self.font_caption,
+            bg=COLORS["bg_primary"],
+            fg=COLORS["text_secondary"]
         )
-        self.timer_sub_label.pack(pady=(5, 0))
-        
-        # --- Button Section ---
-        button_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
-        button_frame.grid(row=7, column=0, sticky="ew")
-        
-        # Pause/Resume Button (Rounded) - hidden initially, appears when session running
-        self.pause_btn = RoundedButton(
-            button_frame,
-            text="Pause Session",
-            command=self._toggle_pause,
-            bg_color=COLORS["button_pause"],
-            hover_color=COLORS["button_pause_hover"],
-            fg_color=COLORS["text_white"],
-            font=self.font_button,
-            corner_radius=10,
-            width=200,
-            height=56
-        )
-        # Hidden initially - will be shown when session starts
-        
-        # Start/Stop Button (Rounded) - centered
+        self.timer_sub_label.pack(pady=(12, 40))
+
+        # Start Button
         self.start_stop_btn = RoundedButton(
-            button_frame,
+            timer_frame,
             text="Start Session",
-            command=self._toggle_session,
+            width=240,
+            height=64,
             bg_color=COLORS["button_start"],
-            hover_color=COLORS["button_start_hover"],
-            fg_color=COLORS["text_white"],
+            hover_color=COLORS["status_focused"],  # Green hover
+            text_color="#FFFFFF",
             font=self.font_button,
-            corner_radius=10,
-            width=200,
-            height=56
+            command=self._toggle_session
         )
-        self.start_stop_btn.pack()
+        self.start_stop_btn.pack(pady=10)
         
-        # --- Mode Selector Section (below buttons) ---
-        self._create_mode_selector()
+        # Pause button (hidden initially)
+        self.pause_btn = RoundedButton(
+            timer_frame,
+            text="Pause Session",
+            width=240,
+            height=64,
+            bg_color=COLORS["button_pause"],
+            text_color="#FFFFFF",
+            font=self.font_button,
+            command=self._toggle_pause
+        )
+        # Don't pack it yet
+
+        # Mode Toggles
+        self._create_mode_selector(timer_frame)
+
+        # --- Footer (Fixed at bottom) ---
+        footer_frame = tk.Frame(self.root, bg=COLORS["bg_primary"])
+        footer_frame.pack(side=tk.BOTTOM, pady=50, fill="x")
+        
+        footer_links = tk.Label(footer_frame, text="Blocklist Settings   •   How To Use", font=self.font_small, bg=COLORS["bg_primary"], fg=COLORS["text_secondary"], cursor="")
+        footer_links.pack()
+        footer_links.bind("<Button-1>", lambda e: self._show_blocklist_settings()) 
+        # Note: "How To Use" click handling is tricky with single label. 
+        # For now, let's just make the whole text open settings or maybe separate them.
+        # Let's separate them for proper clicking.
+        
+        footer_links.pack_forget() # Remove the single label
+        
+        link_container = tk.Frame(footer_frame, bg=COLORS["bg_primary"])
+        link_container.pack()
+        
+        l1 = tk.Label(link_container, text="Blocklist Settings", font=self.font_small, bg=COLORS["bg_primary"], fg=COLORS["text_secondary"], cursor="")
+        l1.pack(side=tk.LEFT, padx=10)
+        l1.bind("<Button-1>", lambda e: self._show_blocklist_settings())
+        l1.bind("<Enter>", lambda e: l1.config(fg=COLORS["button_resume_hover"]))
+        l1.bind("<Leave>", lambda e: l1.config(fg=COLORS["text_secondary"]))
+        
+        tk.Label(link_container, text="•", font=self.font_small, bg=COLORS["bg_primary"], fg=COLORS["text_secondary"]).pack(side=tk.LEFT)
+        
+        l2 = tk.Label(link_container, text="How To Use", font=self.font_small, bg=COLORS["bg_primary"], fg=COLORS["text_secondary"], cursor="")
+        l2.pack(side=tk.LEFT, padx=10)
+        l2.bind("<Button-1>", lambda e: self._show_tutorial())
+        l2.bind("<Enter>", lambda e: l2.config(fg=COLORS["button_resume_hover"]))
+        l2.bind("<Leave>", lambda e: l2.config(fg=COLORS["text_secondary"]))
+        
+        # Status Badge removed - integrated into camera card
+
+
+    def _create_stat_card(self, parent, col, card_type):
+        """Create a minimal stat card with just title and value."""
+        wrapper = tk.Frame(parent, bg=COLORS["bg_primary"])
+        # Use pack for vertical stacking in stats_container
+        wrapper.pack(pady=5)
+        
+        # Compact card dimensions
+        card_width = 280
+        center_x = card_width // 2
+        
+        card = Card(wrapper, width=card_width, height=120)
+        card.pack()
+        
+        # Initialize storage for this card type
+        self.stat_cards[card_type] = {"card": card, "wrapper": wrapper}
+        
+        if card_type == "focus":
+            title = "TODAY'S FOCUS"
+            main_val = "0m"
+            sub_label = "Focused"
+            sub_val = "0m"
+        elif card_type == "distractions":
+            title = "TODAY'S DISTRACTIONS"
+            main_val = "0m"
+            sub_label = "Total"
+            sub_val = "0m"
+        else:  # rate
+            title = "TODAY'S FOCUS RATE"
+            main_val = "0%"
+            sub_label = ""
+            sub_val = ""
+        
+        # Title (Centered at top)
+        card.create_text(center_x, 30, text=title, anchor="center", font=self.font_caption, fill=COLORS["text_secondary"])
+        
+        # Main Value (Large, centered)
+        self.stat_cards[card_type]["main"] = card.create_text(
+            center_x, 72, text=main_val, anchor="center", font=self.font_stat, fill=COLORS["text_primary"]
+        )
+        
+        # Sub-stats (Only for Focus and Distractions)
+        if card_type != "rate":
+            # Sub-stat (Centered below main)
+            # card.create_text(center_x - 10, 115, text=sub_label, anchor="e", font=self.font_small, fill=COLORS["text_secondary"])
+            # self.stat_cards[card_type]["sub"] = card.create_text(
+            #    center_x + 10, 115, text=sub_val, anchor="w", font=self.font_small, fill=COLORS["text_primary"]
+            # )
+            pass
+
+    def _init_daily_stat_cards(self):
+        """
+        Initialize stat cards with today's accumulated values on app startup.
+        
+        Shows the daily totals from previous sessions today when the app first opens.
+        """
+        # Helper for time formatting
+        def fmt_time(seconds):
+            total_mins = int(seconds // 60)
+            if total_mins >= 60:
+                hours = total_mins // 60
+                mins = total_mins % 60
+                return f"{hours}h {mins}m"
+            else:
+                return f"{total_mins}m"
+        
+        # Get today's accumulated stats
+        daily_focus = self.daily_stats.get_focus_seconds()
+        daily_distraction = self.daily_stats.get_distraction_seconds()
+        daily_rate = self.daily_stats.get_focus_rate()
+        
+        # Update Focus Card
+        if "focus" in self.stat_cards:
+            card = self.stat_cards["focus"]["card"]
+            card.itemconfigure(self.stat_cards["focus"]["main"], text=fmt_time(daily_focus))
+        
+        # Update Distractions Card
+        if "distractions" in self.stat_cards:
+            card = self.stat_cards["distractions"]["card"]
+            card.itemconfigure(self.stat_cards["distractions"]["main"], text=fmt_time(daily_distraction))
+        
+        # Update Focus Rate Card
+        if "rate" in self.stat_cards:
+            card = self.stat_cards["rate"]["card"]
+            card.itemconfigure(self.stat_cards["rate"]["main"], text=f"{int(daily_rate)}%")
+
+    def _update_stat_cards(self):
+        """
+        Update stat card values with TODAY's total stats.
+        
+        Combines daily accumulated stats (from previous sessions today) 
+        with current session's ongoing stats to show daily totals.
+        """
+        if not self.session or not self.session_started:
+            return
+            
+        # Get current session stats
+        current_time = datetime.now()
+        events = list(self.session.events)
+        
+        # Add current ongoing event if exists
+        if self.session.current_state and self.session.state_start_time:
+            duration = (current_time - self.session.state_start_time).total_seconds()
+            events.append({
+                "type": self.session.current_state,
+                "start": self.session.state_start_time.isoformat(),
+                "end": current_time.isoformat(),
+                "duration_seconds": duration
+            })
+            
+        # Calculate total duration for current session
+        if self.session.start_time:
+            total_duration = (current_time - self.session.start_time).total_seconds()
+        else:
+            total_duration = 0
+            
+        # Compute current session stats
+        session_stats = compute_statistics(events, total_duration)
+        
+        # Get current session values
+        session_focus = session_stats["present_seconds"]
+        session_away = session_stats["away_seconds"]
+        session_gadget = session_stats["gadget_seconds"]
+        session_screen = session_stats.get("screen_distraction_seconds", 0)
+        session_distraction = session_away + session_gadget + session_screen
+        
+        # Get today's accumulated stats (from previous sessions)
+        daily_stats = self.daily_stats.get_daily_stats()
+        daily_focus = daily_stats["focus_seconds"]
+        daily_distraction = daily_stats["distraction_seconds"]
+        
+        # Calculate TODAY's totals (daily accumulated + current session)
+        today_focus = daily_focus + session_focus
+        today_distraction = daily_distraction + session_distraction
+        today_total_active = today_focus + today_distraction
+        
+        # Calculate TODAY's focus rate: focus / (focus + distractions) * 100
+        # Paused time is NOT included in either value
+        if today_total_active > 0:
+            today_focus_rate = (today_focus / today_total_active) * 100.0
+        else:
+            today_focus_rate = 0.0
+        
+        # Helper for time formatting
+        def fmt_time(seconds):
+            total_mins = int(seconds // 60)
+            if total_mins >= 60:
+                hours = total_mins // 60
+                mins = total_mins % 60
+                return f"{hours}h {mins}m"
+            else:
+                return f"{total_mins}m"
+        
+        # --- Update Focus Card (TODAY's total focused time) ---
+        if "focus" in self.stat_cards:
+            card_data = self.stat_cards["focus"]
+            card = card_data["card"]
+            card.itemconfigure(card_data["main"], text=fmt_time(today_focus))
+            
+        # --- Update Distractions Card (TODAY's total: away + gadget + screen) ---
+        if "distractions" in self.stat_cards:
+            card_data = self.stat_cards["distractions"]
+            card = card_data["card"]
+            card.itemconfigure(card_data["main"], text=fmt_time(today_distraction))
+
+        # --- Update Focus Rate Card (TODAY's rate) ---
+        if "rate" in self.stat_cards:
+            card_data = self.stat_cards["rate"]
+            card = card_data["card"]
+            card.itemconfigure(card_data["main"], text=f"{int(today_focus_rate)}%")
     
-    def _create_mode_selector(self):
+    def _reset_stat_cards(self):
+        """
+        Reset stat cards to show today's accumulated totals (before current session).
+        
+        Called when starting a new session. Shows what's already accumulated today
+        from previous sessions, which will then be updated with current session progress.
+        """
+        # Helper for time formatting
+        def fmt_time(seconds):
+            total_mins = int(seconds // 60)
+            if total_mins >= 60:
+                hours = total_mins // 60
+                mins = total_mins % 60
+                return f"{hours}h {mins}m"
+            else:
+                return f"{total_mins}m"
+        
+        # Get today's accumulated stats (from previous sessions)
+        daily_focus = self.daily_stats.get_focus_seconds()
+        daily_distraction = self.daily_stats.get_distraction_seconds()
+        daily_rate = self.daily_stats.get_focus_rate()
+        
+        if "focus" in self.stat_cards:
+            card = self.stat_cards["focus"]["card"]
+            card.itemconfigure(self.stat_cards["focus"]["main"], text=fmt_time(daily_focus))
+        
+        if "distractions" in self.stat_cards:
+            card = self.stat_cards["distractions"]["card"]
+            card.itemconfigure(self.stat_cards["distractions"]["main"], text=fmt_time(daily_distraction))
+        
+        if "rate" in self.stat_cards:
+            card = self.stat_cards["rate"]["card"]
+            card.itemconfigure(self.stat_cards["rate"]["main"], text=f"{int(daily_rate)}%")
+    
+    def _finalize_stat_cards(self):
+        """
+        Save session stats to daily totals and update stat cards.
+        
+        Called when a session ends. Saves this session's stats to the daily
+        tracker, then displays the new daily totals.
+        """
+        if not self.session or not self.session_started:
+            return
+        
+        # Compute final session stats from events
+        events = list(self.session.events)
+        total_duration = self.session.get_duration()
+        stats = compute_statistics(events, total_duration)
+        
+        # Get session values (integers, truncated from floats)
+        session_focus = int(stats["present_seconds"])
+        session_away = int(stats["away_seconds"])
+        session_gadget = int(stats["gadget_seconds"])
+        session_screen = int(stats.get("screen_distraction_seconds", 0))
+        
+        # Save this session's stats to daily totals
+        # This accumulates today's progress across all sessions
+        self.daily_stats.add_session_stats(
+            focus_seconds=session_focus,
+            away_seconds=session_away,
+            gadget_seconds=session_gadget,
+            screen_distraction_seconds=session_screen
+        )
+        
+        # Get the new daily totals (now includes this session)
+        daily_focus = self.daily_stats.get_focus_seconds()
+        daily_distraction = self.daily_stats.get_distraction_seconds()
+        daily_focus_rate = self.daily_stats.get_focus_rate()
+        
+        # Helper for time formatting
+        def fmt_time(seconds):
+            total_mins = int(seconds // 60)
+            if total_mins >= 60:
+                hours = total_mins // 60
+                mins = total_mins % 60
+                return f"{hours}h {mins}m"
+            else:
+                return f"{total_mins}m"
+        
+        # Update stat cards with TODAY's totals
+        if "focus" in self.stat_cards:
+            card = self.stat_cards["focus"]["card"]
+            card.itemconfigure(self.stat_cards["focus"]["main"], text=fmt_time(daily_focus))
+        
+        if "distractions" in self.stat_cards:
+            card = self.stat_cards["distractions"]["card"]
+            card.itemconfigure(self.stat_cards["distractions"]["main"], text=fmt_time(daily_distraction))
+        
+        if "rate" in self.stat_cards:
+            card = self.stat_cards["rate"]["card"]
+            card.itemconfigure(self.stat_cards["rate"]["main"], text=f"{int(daily_focus_rate)}%")
+        
+        logger.info(f"Session saved to daily stats. Today's totals: "
+                   f"Focus={fmt_time(daily_focus)}, Distractions={fmt_time(daily_distraction)}, "
+                   f"Rate={int(daily_focus_rate)}%")
+    
+    def _create_mode_selector(self, parent=None):
         """
         Create the monitoring mode selector UI.
         
         Allows users to choose between Camera Only, Screen Only, or Both modes.
-        Also provides access to blocklist settings.
         """
         # Mode selector container
-        self.mode_frame = tk.Frame(self.main_frame, bg=COLORS["bg_primary"])
-        self.mode_frame.grid(row=8, column=0, sticky="ew", pady=(25, 0))
+        # If parent is provided, use it, otherwise use main_frame (legacy support)
+        target_parent = parent if parent else self.main_frame
+        
+        self.mode_frame = tk.Frame(target_parent, bg=COLORS["bg_primary"])
+        if parent:
+            self._mode_frame_manager = "pack"
+            self._mode_frame_pack_opts = {"pady": 20}
+            self.mode_frame.pack(**self._mode_frame_pack_opts)
+        else:
+            self._mode_frame_manager = "grid"
+            self._mode_frame_grid_opts = {"row": 8, "column": 0, "sticky": "ew", "pady": (25, 0)}
+            self.mode_frame.grid(**self._mode_frame_grid_opts)
         
         # Mode buttons container
         mode_buttons_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_primary"])
@@ -1477,49 +1674,72 @@ class BrainDockGUI:
         
         self.mode_buttons = {}
         for mode_id, mode_text in modes:
-            # Light theme: selected = accent bg with white text, unselected = light bg with gray text
+            # Seraphic style: Simple text labels
             is_selected = mode_id == self.monitoring_mode
+            
+            # Use Label acting as button
             btn = tk.Label(
                 mode_buttons_frame,
                 text=mode_text,
-                font=self.font_small,
-                fg=COLORS["text_white"] if is_selected else COLORS["text_secondary"],
-                bg=COLORS["toggle_on"] if is_selected else COLORS["toggle_off"],
-                padx=16,
-                pady=8,
+                font=self.font_caption if is_selected else self.font_small,
+                fg=COLORS["text_primary"] if is_selected else COLORS["text_secondary"],
+                bg=COLORS["bg_primary"]
             )
-            btn.pack(side=tk.LEFT, padx=3)
+            btn.pack(side=tk.LEFT, padx=15)
             btn.bind("<Button-1>", lambda e, m=mode_id: self._set_monitoring_mode(m))
+            
+            # Add hover effects
+            btn.bind("<Enter>", lambda e, b=btn, m=mode_id: self._on_mode_hover(b, m, True))
+            btn.bind("<Leave>", lambda e, b=btn, m=mode_id: self._on_mode_hover(b, m, False))
+            
             self.mode_buttons[mode_id] = btn
+
+    def _on_mode_hover(self, btn, mode_id, entering):
+        """Handle hover effect for mode buttons."""
+        is_selected = (mode_id == self.monitoring_mode)
         
-        # Settings button (for blocklist management) - text link style
-        settings_frame = tk.Frame(self.mode_frame, bg=COLORS["bg_primary"])
-        settings_frame.pack(pady=(25, 0))
+        # Determine base font
+        base_font = self.font_caption if is_selected else self.font_small
         
-        self.settings_btn = tk.Label(
-            settings_frame,
-            text="Blocklist Settings",
-            font=self.font_small,
-            fg=COLORS["accent_primary"],
-            bg=COLORS["bg_primary"]
-        )
-        self.settings_btn.pack()
-        self.settings_btn.bind("<Button-1>", lambda e: self._show_blocklist_settings())
-        self.settings_btn.bind("<Enter>", lambda e: self.settings_btn.configure(fg=COLORS["status_focused"]))
-        self.settings_btn.bind("<Leave>", lambda e: self.settings_btn.configure(fg=COLORS["accent_primary"]))
+        family = base_font.cget("family")
+        size = base_font.cget("size")
+        weight = base_font.cget("weight")
         
-        # Tutorial button - right under Blocklist Settings
-        self.tutorial_btn = tk.Label(
-            settings_frame,
-            text="How To Use",
-            font=self.font_small,
-            fg=COLORS["accent_primary"],
-            bg=COLORS["bg_primary"]
-        )
-        self.tutorial_btn.pack(pady=(3, 0))
-        self.tutorial_btn.bind("<Button-1>", lambda e: self._show_tutorial())
-        self.tutorial_btn.bind("<Enter>", lambda e: self.tutorial_btn.configure(fg=COLORS["status_focused"]))
-        self.tutorial_btn.bind("<Leave>", lambda e: self.tutorial_btn.configure(fg=COLORS["accent_primary"]))
+        if entering:
+            # Underline on hover
+            new_font = (family, size, weight, "underline")
+            # Also darken text if not selected
+            if not is_selected:
+                btn.configure(fg=COLORS["text_primary"])
+        else:
+            # Normal on leave
+            new_font = base_font
+            # Restore color if not selected
+            if not is_selected:
+                btn.configure(fg=COLORS["text_secondary"])
+                
+        btn.configure(font=new_font)
+
+    def _hide_mode_selector(self):
+        """Hide mode selector during active sessions."""
+        if not hasattr(self, "mode_frame"):
+            return
+        manager = self.mode_frame.winfo_manager()
+        if manager == "pack" or self._mode_frame_manager == "pack":
+            self.mode_frame.pack_forget()
+        elif manager == "grid" or self._mode_frame_manager == "grid":
+            self.mode_frame.grid_remove()
+
+    def _show_mode_selector(self):
+        """Show mode selector when session is stopped."""
+        if not hasattr(self, "mode_frame"):
+            return
+        if self._mode_frame_manager == "pack":
+            pack_opts = getattr(self, "_mode_frame_pack_opts", {"pady": 20})
+            self.mode_frame.pack(**pack_opts)
+        elif self._mode_frame_manager == "grid":
+            grid_opts = getattr(self, "_mode_frame_grid_opts", {"row": 8, "column": 0, "sticky": "ew", "pady": (25, 0)})
+            self.mode_frame.grid(**grid_opts)
     
     def _set_monitoring_mode(self, mode: str):
         """
@@ -1544,13 +1764,13 @@ class BrainDockGUI:
         for mode_id, btn in self.mode_buttons.items():
             if mode_id == mode:
                 btn.configure(
-                    fg=COLORS["text_white"],
-                    bg=COLORS["toggle_on"]
+                    fg=COLORS["text_primary"],
+                    font=self.font_caption
                 )
             else:
                 btn.configure(
                     fg=COLORS["text_secondary"],
-                    bg=COLORS["toggle_off"]
+                    font=self.font_small
                 )
         
         logger.info(f"Monitoring mode set to: {mode}")
@@ -1565,20 +1785,20 @@ class BrainDockGUI:
         settings_window = tk.Toplevel(self.root)
         settings_window.title("Blocklist Settings")
         settings_window.configure(bg=COLORS["bg_primary"])
-        settings_window.geometry("420x700")
+        settings_window.geometry("550x850")
         settings_window.resizable(False, False)
         
         # Center on parent window
         settings_window.transient(self.root)
         settings_window.grab_set()
         
-        x = self.root.winfo_x() + (self.root.winfo_width() - 420) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 700) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - 550) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 850) // 2
         settings_window.geometry(f"+{x}+{y}")
         
         # Main container with padding
         main_container = tk.Frame(settings_window, bg=COLORS["bg_primary"])
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=40, pady=20)
         
         # Title
         title = tk.Label(
@@ -1588,7 +1808,7 @@ class BrainDockGUI:
             fg=COLORS["accent_primary"],
             bg=COLORS["bg_primary"]
         )
-        title.pack()
+        title.pack(pady=(0, 5))
         
         subtitle = tk.Label(
             main_container,
@@ -1597,7 +1817,7 @@ class BrainDockGUI:
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_primary"]
         )
-        subtitle.pack(pady=(5, 15))
+        subtitle.pack(pady=(0, 25))
         
         # Categories section
         categories_label = tk.Label(
@@ -1607,19 +1827,19 @@ class BrainDockGUI:
             fg=COLORS["text_primary"],
             bg=COLORS["bg_primary"]
         )
-        categories_label.pack(anchor="w")
+        categories_label.pack(anchor="w", pady=(0, 10))
         
         # Category toggles
         self.category_vars = {}
         categories_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
-        categories_frame.pack(fill=tk.X, pady=(5, 15))
+        categories_frame.pack(fill=tk.X, pady=(0, 20))
         
         for cat_id, cat_data in PRESET_CATEGORIES.items():
             var = tk.BooleanVar(value=cat_id in self.blocklist.enabled_categories)
             self.category_vars[cat_id] = var
             
             row = tk.Frame(categories_frame, bg=COLORS["bg_primary"])
-            row.pack(fill=tk.X, pady=2)
+            row.pack(fill=tk.X, pady=4)
             
             cb = tk.Checkbutton(
                 row,
@@ -1641,9 +1861,10 @@ class BrainDockGUI:
                 text=f"({len(cat_data['patterns'])} sites)",
                 font=self.font_small,
                 fg=COLORS["accent_primary"],
-                bg=COLORS["bg_primary"]
+                bg=COLORS["bg_primary"],
+                cursor="hand2"
             )
-            desc.pack(side=tk.LEFT, padx=(5, 0))
+            desc.pack(side=tk.LEFT, padx=(8, 0))
             # Bind click to show sites popup
             desc.bind("<Button-1>", lambda e, c=cat_id, d=cat_data: self._show_category_sites(c, d))
             desc.bind("<Enter>", lambda e, lbl=desc: lbl.configure(fg=COLORS["accent_warm"]))
@@ -1657,7 +1878,7 @@ class BrainDockGUI:
             fg=COLORS["text_primary"],
             bg=COLORS["bg_primary"]
         )
-        urls_label.pack(anchor="w", pady=(10, 2))
+        urls_label.pack(anchor="w", pady=(10, 5))
         
         urls_help = tk.Label(
             main_container,
@@ -1666,11 +1887,11 @@ class BrainDockGUI:
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_primary"]
         )
-        urls_help.pack(anchor="w")
+        urls_help.pack(anchor="w", pady=(0, 5))
         
         # URLs text area with validation feedback
-        urls_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"])
-        urls_frame.pack(fill=tk.X, pady=(3, 5))
+        urls_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"], padx=1, pady=1)
+        urls_frame.pack(fill=tk.X, pady=(0, 5))
         
         self.custom_urls_text = tk.Text(
             urls_frame,
@@ -1679,9 +1900,12 @@ class BrainDockGUI:
             bg=COLORS["bg_secondary"],
             insertbackground=COLORS["text_primary"],
             height=3,
-            wrap=tk.WORD
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
         )
-        self.custom_urls_text.pack(fill=tk.X, padx=5, pady=5)
+        self.custom_urls_text.pack(fill=tk.X)
         
         # URL validation status label with tooltip for full message
         self.url_validation_label = tk.Label(
@@ -1706,7 +1930,7 @@ class BrainDockGUI:
             fg=COLORS["text_primary"],
             bg=COLORS["bg_primary"]
         )
-        apps_label.pack(anchor="w", pady=(8, 2))
+        apps_label.pack(anchor="w", pady=(15, 5))
         
         apps_help = tk.Label(
             main_container,
@@ -1715,11 +1939,11 @@ class BrainDockGUI:
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_primary"]
         )
-        apps_help.pack(anchor="w")
+        apps_help.pack(anchor="w", pady=(0, 5))
         
         # Apps text area with validation feedback
-        apps_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"])
-        apps_frame.pack(fill=tk.X, pady=(3, 5))
+        apps_frame = tk.Frame(main_container, bg=COLORS["bg_secondary"], padx=1, pady=1)
+        apps_frame.pack(fill=tk.X, pady=(0, 5))
         
         self.custom_apps_text = tk.Text(
             apps_frame,
@@ -1728,9 +1952,12 @@ class BrainDockGUI:
             bg=COLORS["bg_secondary"],
             insertbackground=COLORS["text_primary"],
             height=3,
-            wrap=tk.WORD
+            wrap=tk.WORD,
+            relief=tk.FLAT,
+            padx=10,
+            pady=10
         )
-        self.custom_apps_text.pack(fill=tk.X, padx=5, pady=5)
+        self.custom_apps_text.pack(fill=tk.X)
         
         # App validation status label with tooltip for full message
         self.app_validation_label = tk.Label(
@@ -1753,7 +1980,7 @@ class BrainDockGUI:
         
         # AI Fallback option (advanced) - OFF BY DEFAULT
         ai_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
-        ai_frame.pack(fill=tk.X, pady=(10, 15))
+        ai_frame.pack(fill=tk.X, pady=(20, 20))
         
         self.ai_fallback_var = tk.BooleanVar(value=self.use_ai_fallback)
         ai_cb = tk.Checkbutton(
@@ -1776,11 +2003,11 @@ class BrainDockGUI:
             fg=COLORS["accent_warm"],
             bg=COLORS["bg_primary"]
         )
-        ai_help.pack(anchor="w", padx=(20, 0))
+        ai_help.pack(anchor="w", padx=(24, 0))
         
         # Buttons - centered at bottom
         button_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
-        button_frame.pack(fill=tk.X, pady=(10, 0))
+        button_frame.pack(fill=tk.X, pady=(20, 0))
         
         # Center the buttons
         button_container = tk.Frame(button_frame, bg=COLORS["bg_primary"])
@@ -1794,11 +2021,11 @@ class BrainDockGUI:
             hover_color=COLORS["button_start_hover"],
             fg_color=COLORS["text_white"],
             font=self.font_button,
-            corner_radius=8,
-            width=150,
-            height=44
+            corner_radius=10,
+            width=160,
+            height=48
         )
-        save_btn.pack(side=tk.LEFT, padx=(0, 10))
+        save_btn.pack(side=tk.LEFT, padx=(0, 15))
         
         cancel_btn = RoundedButton(
             button_container,
@@ -1808,9 +2035,9 @@ class BrainDockGUI:
             hover_color=COLORS["button_pause_hover"],
             fg_color=COLORS["text_white"],
             font=self.font_button,
-            corner_radius=8,
-            width=100,
-            height=44
+            corner_radius=10,
+            width=110,
+            height=48
         )
         cancel_btn.pack(side=tk.LEFT)
     
@@ -2872,8 +3099,8 @@ class BrainDockGUI:
         tutorial_window.title("How to Use BrainDock")
         tutorial_window.configure(bg=COLORS["bg_primary"])
         
-        window_width = 620
-        window_height = 580
+        window_width = 680
+        window_height = 640
         tutorial_window.geometry(f"{window_width}x{window_height}")
         tutorial_window.resizable(False, False)
         
@@ -2887,7 +3114,7 @@ class BrainDockGUI:
         
         # Main container with padding
         main_container = tk.Frame(tutorial_window, bg=COLORS["bg_primary"])
-        main_container.pack(fill=tk.BOTH, expand=True, padx=25, pady=20)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=30, pady=25)
         
         # Header
         title = tk.Label(
@@ -2902,17 +3129,17 @@ class BrainDockGUI:
         subtitle = tk.Label(
             main_container,
             text="Your AI-powered focus companion",
-            font=self.font_small,
+            font=self.font_body,
             fg=COLORS["text_secondary"],
             bg=COLORS["bg_primary"]
         )
-        subtitle.pack(pady=(5, 20))
+        subtitle.pack(pady=(8, 25))
         
         # Scrollable content area
         canvas_frame = tk.Frame(main_container, bg=COLORS["bg_primary"])
         canvas_frame.pack(fill=tk.BOTH, expand=True)
         
-        content_width = 550
+        content_width = 600
         canvas = tk.Canvas(
             canvas_frame,
             bg=COLORS["bg_primary"],
@@ -3021,21 +3248,22 @@ class BrainDockGUI:
         # Create tutorial sections
         for i, (icon, icon_color, section_title, description) in enumerate(tutorial_sections):
             section_frame = tk.Frame(scrollable_frame, bg=COLORS["bg_primary"])
-            section_frame.pack(fill=tk.X, pady=(0, 15))
+            section_frame.pack(fill=tk.X, pady=(0, 20))
             
             # Icon and title row
             header_frame = tk.Frame(section_frame, bg=COLORS["bg_primary"])
             header_frame.pack(fill=tk.X, anchor="w")
             
-            # Icon label
+            # Icon label - use system font with fallback
+            icon_font = get_system_font(size=20, weight="normal")
             icon_label = tk.Label(
                 header_frame,
                 text=icon,
-                font=tkfont.Font(family="SF Pro Display", size=18),
+                font=icon_font,
                 fg=icon_color,
                 bg=COLORS["bg_primary"]
             )
-            icon_label.pack(side=tk.LEFT, padx=(0, 10))
+            icon_label.pack(side=tk.LEFT, padx=(0, 12))
             
             # Section title
             title_label = tk.Label(
@@ -3047,18 +3275,54 @@ class BrainDockGUI:
             )
             title_label.pack(side=tk.LEFT)
             
-            # Description
-            desc_label = tk.Label(
+            # Description using Text widget for better line spacing
+            # Estimate lines needed: chars / approx width in chars
+            # Font size 14 approx 8px width -> 560px / 8px = 70 chars
+            # We use width=65 to be safe
+            
+            desc_text = tk.Text(
                 section_frame,
-                text=description,
-                font=self.font_small,
+                font=self.font_body,
                 fg=COLORS["text_secondary"],
                 bg=COLORS["bg_primary"],
-                justify=tk.LEFT,
-                wraplength=520,
-                anchor="w"
+                bd=0,
+                highlightthickness=0,
+                wrap=tk.WORD,
+                width=65,
+                spacing2=6,  # Line spacing
+                spacing3=5,  # Paragraph spacing
+                cursor="arrow"
             )
-            desc_label.pack(fill=tk.X, pady=(5, 0), padx=(28, 0))
+            desc_text.insert("1.0", description)
+            
+            # Calculate height based on content using font measurement
+            # Available width: Window(680) - MainPad(60) - TextPad(32) - Scrollbar(20) = 568
+            available_width = 560  # Use 560 for safety
+            
+            num_lines = 0
+            for paragraph in description.split('\n'):
+                if not paragraph:
+                    num_lines += 1
+                    continue
+                    
+                current_line_width = 0
+                lines_in_paragraph = 1
+                
+                for word in paragraph.split():
+                    word_width = self.font_body.measure(word + " ")
+                    if current_line_width + word_width <= available_width:
+                        current_line_width += word_width
+                    else:
+                        lines_in_paragraph += 1
+                        current_line_width = word_width
+                
+                num_lines += lines_in_paragraph
+            
+            desc_text.configure(height=num_lines, state="disabled")
+            desc_text.pack(fill=tk.X, pady=(8, 0), padx=(32, 0))
+            
+            # Bind mousewheel to the text widget
+            desc_text.bind("<MouseWheel>", _on_mousewheel)
             
         # Bind mousewheel to all widgets in the scrollable frame
         self._tutorial_bind_mousewheel(scrollable_frame)
@@ -3210,8 +3474,8 @@ By clicking 'I Understand', you acknowledge this data processing."""
             text_color = COLORS["text_white"]
             time_text = f"{time_text} left"
         else:
-            badge_color = COLORS["time_badge"]
-            text_color = COLORS["text_white"]
+            badge_color = COLORS.get("badge_bg", COLORS["bg_tertiary"])
+            text_color = COLORS.get("badge_text", COLORS["text_secondary"])
             time_text = f"{time_text} left"
         
         self.time_badge.configure_badge(text=time_text, bg_color=badge_color, fg_color=text_color)
@@ -3290,7 +3554,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         self._update_time_badge()
         
         # Disable start button
-        self.start_stop_btn.configure_button(state=tk.DISABLED)
+        self.start_stop_btn.configure(state=tk.DISABLED)
     
     def _hide_lockout_overlay(self):
         """Hide the lockout overlay after successful unlock."""
@@ -3302,10 +3566,10 @@ By clicking 'I Understand', you acknowledge this data processing."""
         self._update_time_badge()
         
         # Restore mode selector (hidden when session was running before time exhausted)
-        self.mode_frame.grid()
+        self._show_mode_selector()
         
         # Re-enable start button and reset UI state
-        self.start_stop_btn.configure_button(state=tk.NORMAL)
+        self.start_stop_btn.configure(state=tk.NORMAL)
         self._reset_button_state()
         self._update_status("idle", "Ready to Start")
         
@@ -3492,7 +3756,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         
         # Update UI instantly with frozen value
         self._update_status("paused", "Paused")
-        self.pause_btn.configure_button(
+        self.pause_btn.configure(
             text="Resume Session",
             bg_color=COLORS["button_resume"],
             hover_color=COLORS["button_resume_hover"]
@@ -3539,7 +3803,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
         
         # Update UI
         self._update_status("focused", "Focused")
-        self.pause_btn.configure_button(
+        self.pause_btn.configure(
             text="Pause Session",
             bg_color=COLORS["button_pause"],
             hover_color=COLORS["button_pause_hover"]
@@ -3593,25 +3857,51 @@ By clicking 'I Understand', you acknowledge this data processing."""
         self.unfocused_start_time = None
         self.alerts_played = 0
         
-        # Hide mode selector during session
-        self.mode_frame.grid_remove()
+        # Reset distraction counters
+        self.gadget_detection_count = 0
+        self.screen_distraction_count = 0
+        
+        # Reset stat cards to zero values (clear any stale data from previous session)
+        self._reset_stat_cards()
+        
+        # --- Layout Transition: Active State ---
+        # Hide stats panel (Left)
+        self.stats_container.pack_forget()
+        
+        # Hide mode selector (Camera/Screen/Both buttons)
+        self._hide_mode_selector()
+        
+        # Center controls panel (Right)
+        # Since stats are gone, controls_container is the only child of content_frame.
+        # content_frame uses place(anchor="center"), so it will shrink to fit controls and re-center.
+        # We just need to ensure controls_container is packed correctly.
+        self.controls_container.pack(side=tk.TOP, anchor="center")
+        
+        # Update sub-label to show session mode
+        mode_labels = {
+            config.MODE_CAMERA_ONLY: "Camera Session",
+            config.MODE_SCREEN_ONLY: "Screen Session",
+            config.MODE_BOTH: "Camera + Screen Session"
+        }
+        mode_label = mode_labels.get(self.monitoring_mode, "Session Duration")
+        self.timer_sub_label.config(text=mode_label)
         
         # Update UI - show both buttons (pause on top, stop below)
-        self._update_status("booting", "Booting Up...", emoji="⚡️")
+        self._update_status("booting", "⚡️ Booting Up...", emoji="⚡️")
         
         # Repack buttons in correct order: pause on top, stop below with gap
         self.start_stop_btn.pack_forget()  # Remove stop button temporarily
         self.pause_btn.pack(pady=(0, 15))  # Pause button first with gap below
-        self.pause_btn.configure_button(
+        self.pause_btn.configure(
             text="Pause Session",
             bg_color=COLORS["button_pause"],
             hover_color=COLORS["button_pause_hover"]
         )
         self.start_stop_btn.pack()  # Stop button below
-        self.start_stop_btn.configure_button(
+        self.start_stop_btn.configure(
             text="Stop Session",
             bg_color=COLORS["button_stop"],
-            hover_color=COLORS["button_stop_hover"]
+            hover_color=COLORS["button_stop_hover"]  # Explicit red hover for stop
         )
         
         # Start appropriate detection thread(s) based on monitoring mode
@@ -3643,15 +3933,6 @@ By clicking 'I Understand', you acknowledge this data processing."""
             )
             self.screen_detection_thread.start()
         
-        # Update sub-label to show session mode
-        mode_labels = {
-            config.MODE_CAMERA_ONLY: "Camera Session",
-            config.MODE_SCREEN_ONLY: "Screen Session",
-            config.MODE_BOTH: "Camera + Screen Session"
-        }
-        mode_label = mode_labels.get(self.monitoring_mode, "Session Duration")
-        self.timer_sub_label.config(text=mode_label)
-        
         logger.info(f"Session started via GUI (mode: {self.monitoring_mode})")
     
     def _stop_session(self):
@@ -3680,7 +3961,18 @@ By clicking 'I Understand', you acknowledge this data processing."""
             self.screen_detection_thread.join(timeout=2.0)
         
         # Show mode selector again
-        self.mode_frame.grid()
+        self._show_mode_selector()
+        
+        # --- Layout Transition: Idle State ---
+        # Restore stats panel (Left)
+        # We need to repack both to ensure correct order
+        self.controls_container.pack_forget()
+        
+        self.stats_container.pack(side=tk.LEFT, padx=(0, 40), anchor="n")
+        self.controls_container.pack(side=tk.LEFT, anchor="n")
+        
+        # Reset sub-label to default
+        self.timer_sub_label.config(text="Session Duration")
         
         # End session (only if it was actually started after first detection)
         if self.session and self.session_started and self.session_start_time:
@@ -3688,17 +3980,22 @@ By clicking 'I Understand', you acknowledge this data processing."""
             # Use full precision until final int conversion for usage tracking
             total_elapsed = (stop_time - self.session_start_time).total_seconds()
             active_duration = int(total_elapsed - self.total_paused_seconds)
+            # Ensure at least 1 second is recorded for any valid session
+            active_duration = max(1, active_duration)
             self.usage_limiter.record_usage(active_duration)
             
             self.session.end(stop_time)  # Use the captured stop time
             self.usage_limiter.end_session()
+            
+            # Update stat cards with final values (ensures stats are accurate, not 1s stale)
+            self._finalize_stat_cards()
         
         # Hide pause button when session stops
         self.pause_btn.pack_forget()
         
         # Update UI to show generating status
         self._update_status("idle", "Generating Reports...")
-        self.start_stop_btn.configure_button(
+        self.start_stop_btn.configure(
             text="Generating...",
             state=tk.DISABLED
         )
@@ -3766,6 +4063,11 @@ By clicking 'I Understand', you acknowledge this data processing."""
                         
                         # Determine event type
                         event_type = get_event_type(detection_state)
+                        
+                        # Check for state change to distraction (increment counters)
+                        if self.session and self.session.current_state != event_type:
+                            if event_type == config.EVENT_GADGET_SUSPECTED:
+                                self.gadget_detection_count += 1
                         
                         # Check if user is unfocused (away or on gadget)
                         is_unfocused = event_type in (config.EVENT_AWAY, config.EVENT_GADGET_SUSPECTED)
@@ -3869,6 +4171,10 @@ By clicking 'I Understand', you acknowledge this data processing."""
                         
                         # Log event
                         if self.session and self.session_started:
+                            # Check for state change to distraction (increment counters)
+                            if self.session.current_state != config.EVENT_SCREEN_DISTRACTION:
+                                self.screen_distraction_count += 1
+                                
                             self.session.log_event(config.EVENT_SCREEN_DISTRACTION)
                         
                         # Determine if it's a website or app distraction
@@ -3958,17 +4264,22 @@ By clicking 'I Understand', you acknowledge this data processing."""
                 # Use full precision until final int conversion for usage tracking
                 total_elapsed = (stop_time - self.session_start_time).total_seconds()
                 active_duration = int(total_elapsed - self.total_paused_seconds)
+                # Ensure at least 1 second is recorded for any valid session
+                active_duration = max(1, active_duration)
                 self.usage_limiter.record_usage(active_duration)
                 
                 self.session.end(stop_time)
                 self.usage_limiter.end_session()
+                
+                # Update stat cards with final values
+                self._finalize_stat_cards()
             
             # Hide pause button when session stops
             self.pause_btn.pack_forget()
             
             # Update UI to show generating status
             self._update_status("idle", "Generating Reports...")
-            self.start_stop_btn.configure_button(
+            self.start_stop_btn.configure(
                 text="Generating...",
                 state=tk.DISABLED
             )
@@ -4089,19 +4400,20 @@ By clicking 'I Understand', you acknowledge this data processing."""
         Args:
             status: Status type (idle, focused, away, gadget, screen, paused)
             text: Display text
-            emoji: Optional emoji to show instead of the colored dot
+            emoji: Optional emoji to show instead of the colored dot (unused now)
         """
         with self.ui_lock:
             self.current_status = status
             fg_color = self._get_current_status_color()
             bg_color = self._get_status_bg_color(status)
-            # Use emoji if provided, otherwise Unicode dot
-            prefix = emoji if emoji else "●"
-            self.status_badge.configure_badge(
-                text=f"{prefix} {text}",
-                fg_color=fg_color,
-                bg_color=bg_color
-            )
+            
+            # Update camera card instead of badge (no prefix)
+            if hasattr(self, 'camera_card'):
+                self.camera_card.configure_card(
+                    text=text,
+                    text_color=fg_color,
+                    bg_color=bg_color
+                )
     
     def _update_timer(self):
         """
@@ -4137,6 +4449,7 @@ By clicking 'I Understand', you acknowledge this data processing."""
                 if current_second != self._last_usage_check_second:
                     self._last_usage_check_second = current_second
                     self._update_time_badge()
+                    self._update_stat_cards()
                     
                     # Check if time exhausted
                     base_remaining = self.usage_limiter.get_remaining_seconds()
@@ -4299,10 +4612,10 @@ By clicking 'I Understand', you acknowledge this data processing."""
     
     def _reset_button_state(self):
         """Reset the button to its initial state."""
-        self.start_stop_btn.configure_button(
+        self.start_stop_btn.configure(
             text="Start Session",
             bg_color=COLORS["button_start"],
-            hover_color=COLORS["button_start_hover"],
+            hover_color=COLORS["status_focused"],
             state=tk.NORMAL
         )
         self.timer_label.configure(text="00:00:00")
@@ -4384,6 +4697,8 @@ By clicking 'I Understand', you acknowledge this data processing."""
             if self.session and self.session_started and self.session_start_time:
                 total_elapsed = (stop_time - self.session_start_time).total_seconds()
                 active_duration = int(total_elapsed - self.total_paused_seconds)
+                # Ensure at least 1 second is recorded for any valid session
+                active_duration = max(1, active_duration)
                 self.usage_limiter.record_usage(active_duration)
                 self.session.end(stop_time)
                 self.usage_limiter.end_session()

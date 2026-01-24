@@ -116,13 +116,12 @@ class BrainDock:
         time.sleep(0.3)
         
         # Flush any pending input
-        import sys
         if sys.stdin.isatty():
             try:
                 import termios
                 termios.tcflush(sys.stdin, termios.TCIFLUSH)
-            except:
-                pass  # Not available on all platforms
+            except (ImportError, OSError):
+                pass  # Not available on all platforms (e.g., Windows)
         
         # Start keyboard listener in separate thread
         stop_event = threading.Event()
@@ -398,7 +397,6 @@ Examples:
             # For GUI mode, show a dialog that appears in front
             try:
                 import tkinter as tk
-                import sys
                 
                 # Create a custom topmost dialog instead of using messagebox
                 root = tk.Tk()

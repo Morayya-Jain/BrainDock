@@ -3,19 +3,13 @@
 **TL;DR**: Python focus tracker using OpenAI Vision API + screen monitoring to detect present/away/gadget/screen_distraction/paused states. Generates PDF reports.
 
 ## Key Files
-
-| File | Purpose |
-|------|---------|
-| `config.py` | **ALL constants** (models, FPS, thresholds, modes, Stripe keys) |
-| `camera/vision_detector.py` | Camera detection logic (`analyze_frame()`) |
-| `screen/window_detector.py` | Screen monitoring (Chrome URLs, window titles) |
-| `screen/blocklist.py` | Distracting sites/apps blocklist management |
-| `tracking/analytics.py` | **Stats computation - MATH MUST ADD UP** |
-| `licensing/license_manager.py` | License validation, Stripe payment, license keys |
-| `licensing/stripe_integration.py` | Stripe Checkout API wrapper |
-| `gui/payment_screen.py` | Payment gate UI (first launch) |
-| `gui/app.py` | Desktop GUI (tkinter) - main application |
-
+- `config.py`: **ALL constants** (models, FPS, thresholds, modes, Stripe keys)
+- `camera/vision_detector.py`: Camera detection logic (`analyze_frame()`)
+- `screen/window_detector.py`: Screen monitoring (Chrome URLs, window titles)
+- `screen/blocklist.py`: Distracting sites/apps blocklist management
+- `tracking/analytics.py`: **Stats computation - MATH MUST ADD UP**
+- `licensing/license_manager.py` / `stripe_integration.py`: License & Stripe
+- `gui/app.py` / `payment_screen.py`: Desktop GUI & Payment UI
 *Ignore: `detection.py`, `phone_detector.py` (legacy)*
 
 ## Critical Rules
@@ -55,12 +49,9 @@ SKIP_LICENSE_CHECK                      # Dev bypass
 ```
 
 ## Common Issues
-
-| Issue | Fix |
-|-------|-----|
-| "Vision API Error: Expecting value" | JSON parsing failed. Check markdown wrapping |
-| "Statistics don't add up" | Verify math in `analytics.py` |
-| "Gadget not detected" | Must be actively in use with person looking at it |
+- "Vision API Error: Expecting value": JSON parsing failed. Check markdown wrapping
+- "Statistics don't add up": Verify math in `analytics.py`
+- "Gadget not detected": Must be actively in use with person looking at it
 
 ## What NOT to Do
 

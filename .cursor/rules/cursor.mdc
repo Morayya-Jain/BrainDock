@@ -1,0 +1,6 @@
+---
+description: 
+alwaysApply: true
+---
+
+Never use cursor="hand2" in UI changes, use the natural native device cursor.

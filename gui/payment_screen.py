@@ -23,8 +23,9 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import config
-from licensing.license_manager import get_license_manager, LicenseManager
-from licensing.stripe_integration import get_stripe_integration, StripeIntegration, STRIPE_AVAILABLE
+from licensing.license_manager import get_license_manager
+from licensing.stripe_integration import get_stripe_integration, STRIPE_AVAILABLE
+from gui.ui_components import RoundedButton, Card, StyledEntry, COLORS, FONTS
 
 logger = logging.getLogger(__name__)
 
@@ -37,31 +38,7 @@ except ImportError:
     Image = None
     ImageTk = None
 
-# Import theme colors from app.py
-try:
-    from gui.app import COLORS, get_colors, BASE_WIDTH, BASE_HEIGHT, ASSETS_DIR
-except ImportError:
-    # Fallback colors if app.py not available
-    COLORS = {
-        "bg_primary": "#FFFFFF",
-        "bg_secondary": "#F9FAFB",
-        "bg_card": "#FFFFFF",
-        "text_primary": "#1F2937",
-        "text_secondary": "#6B7280",
-        "text_white": "#FFFFFF",
-        "border": "#9CA3AF",
-        "accent_primary": "#3B82F6",
-        "button_start": "#10B981",
-        "button_start_hover": "#059669",
-        "status_gadget": "#EF4444",
-    }
-    BASE_WIDTH = 900
-    BASE_HEIGHT = 700
-    ASSETS_DIR = Path(__file__).parent.parent / "assets"
-    
-    def get_colors():
-        return COLORS
-
+ASSETS_DIR = Path(__file__).parent.parent / "assets"
 
 class LocalPaymentServer:
     """
@@ -356,41 +333,39 @@ class PaymentScreen:
         # UI references
         self.main_frame: Optional[tk.Frame] = None
         self.status_label: Optional[tk.Label] = None
-        self.verify_button: Optional[tk.Button] = None
-        self.session_entry: Optional[tk.Entry] = None
+        self.verify_button: Optional[RoundedButton] = None
+        self.session_entry: Optional[StyledEntry] = None
         self.logo_image = None  # Keep reference to prevent garbage collection
-        self._verify_section_visible = False  # Track verify section visibility
         
         self._setup_ui()
         
         # Bind focus event to detect when user returns to app
         self.root.bind("<FocusIn>", self._on_window_focus)
     
+    def _clear_global_status(self, event=None):
+        """Clear global status label when user types."""
+        if self.status_label:
+            self.status_label.config(text="")
+
     def _setup_ui(self):
         """Set up the payment screen UI."""
-        colors = get_colors()
         
         # Configure root window
-        self.root.configure(bg=colors["bg_primary"])
+        self.root.configure(bg=COLORS["bg"])
         
         # Main container
-        self.main_frame = tk.Frame(self.root, bg=colors["bg_primary"])
+        self.main_frame = tk.Frame(self.root, bg=COLORS["bg"])
         self.main_frame.pack(fill="both", expand=True)
         
-        # Center content frame
-        center_frame = tk.Frame(self.main_frame, bg=colors["bg_primary"])
-        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+        # Center Container
+        self.center_container = tk.Frame(self.main_frame, bg=COLORS["bg"])
+        self.center_container.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Header (Logo)
+        header_frame = tk.Frame(self.center_container, bg=COLORS["bg"])
+        header_frame.pack(fill="x", pady=(0, 40))
         
-        # Fonts
-        heading_font = tkfont.Font(family="Helvetica", size=16, weight="bold")
-        body_font = tkfont.Font(family="Helvetica", size=12)
-        button_font = tkfont.Font(family="Helvetica", size=13, weight="bold")
-        
-        # Logo frame
-        logo_frame = tk.Frame(center_frame, bg=colors["bg_primary"])
-        logo_frame.pack(pady=(0, 30))
-        
-        # Load and display logo with text (same as main GUI)
+        # Load and display logo
         logo_loaded = False
         if PIL_AVAILABLE:
             logo_path = ASSETS_DIR / "logo_with_text.png"
@@ -402,278 +377,162 @@ class PaymentScreen:
                     if img.mode != 'RGBA':
                         img = img.convert('RGBA')
                     
-                    # Crop out empty/transparent space around the logo
-                    bbox = img.getbbox()
-                    if bbox:
-                        img = img.crop(bbox)
-                    
-                    # Scale to appropriate size for payment screen
-                    target_height = 60
-                    aspect_ratio = img.width / img.height
-                    target_width = int(target_height * aspect_ratio)
-                    img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                    # Resize
+                    h = 65
+                    aspect = img.width / img.height
+                    img = img.resize((int(h * aspect), h), Image.Resampling.LANCZOS)
                     self.logo_image = ImageTk.PhotoImage(img)
                     
                     logo_label = tk.Label(
-                        logo_frame,
+                        header_frame,
                         image=self.logo_image,
-                        bg=colors["bg_primary"]
+                        bg=COLORS["bg"]
                     )
-                    logo_label.pack()
+                    logo_label.pack() # Centered by default
                     logo_loaded = True
                 except Exception as e:
                     logger.warning(f"Could not load logo: {e}")
         
         # Fallback to text title if logo couldn't be loaded
         if not logo_loaded:
-            title_font = tkfont.Font(family="Helvetica", size=28, weight="bold")
             title_label = tk.Label(
-                logo_frame,
+                header_frame,
                 text="BrainDock",
-                font=title_font,
-                fg=colors["text_primary"],
-                bg=colors["bg_primary"]
+                font=FONTS["heading"],
+                fg=COLORS["text_primary"],
+                bg=COLORS["bg"]
             )
-            title_label.pack()
+            title_label.pack() # Centered by default
         
-        # Card frame for purchase options (using nested frames for permanent border)
-        # Outer frame acts as the border
-        card_border = tk.Frame(
-            center_frame,
-            bg=colors["border"],
-            padx=1,
-            pady=1
-        )
-        card_border.pack(padx=20, pady=10)
+        # Main Card Container - fixed height, no expansion needed
+        self.card_width = 550
+        self.card_height = 530
         
-        # Inner frame is the actual card content
-        card_frame = tk.Frame(
-            card_border,
-            bg=colors["bg_card"],
-            padx=40,
-            pady=30
-        )
-        card_frame.pack()
+        self.card_bg = Card(self.center_container, width=self.card_width, height=self.card_height, bg_color=COLORS["surface"])
+        self.card_bg.pack()
         
-        # Purchase section header
-        purchase_header = tk.Label(
-            card_frame,
-            text="Activate Session",
-            font=heading_font,
-            fg=colors["text_primary"],
-            bg=colors["bg_card"]
-        )
-        purchase_header.pack(pady=(0, 5))
+        # Inner Frame for widgets (placed on top of the card canvas)
+        self.inner_frame = tk.Frame(self.center_container, bg=COLORS["surface"])
+        self.inner_frame.place(in_=self.card_bg, relx=0.5, y=25, anchor="n", width=self.card_width-60, height=self.card_height-60)
         
-        # Price display
-        price_text = "One-time payment"
+        # 1. Title Section
+        tk.Label(self.inner_frame, text="Activate Session", font=FONTS["heading"], bg=COLORS["surface"], fg=COLORS["text_primary"]).pack(pady=(20, 15))
+        
+        price_text = "AUD 4.99"
         if hasattr(config, 'PRODUCT_PRICE_DISPLAY'):
-            price_text = config.PRODUCT_PRICE_DISPLAY
+            price_text = config.PRODUCT_PRICE_DISPLAY.split(" - ")[0] if " - " in config.PRODUCT_PRICE_DISPLAY else config.PRODUCT_PRICE_DISPLAY
+
+        # Price label - unified styling, no hyphen
+        tk.Label(self.inner_frame, text=f"{price_text} · One-time payment for unlimited use", font=FONTS["body"], bg=COLORS["surface"], fg=COLORS["text_secondary"]).pack(pady=(0, 20))
         
-        price_label = tk.Label(
-            card_frame,
-            text=price_text,
-            font=body_font,
-            fg=colors["text_secondary"],
-            bg=colors["bg_card"]
-        )
-        price_label.pack(pady=(0, 20))
-        
-        # Purchase button - green with black text
-        purchase_btn = tk.Button(
-            card_frame,
-            text="Pay via Card",
-            font=button_font,
-            bg=colors["button_start"],
-            fg="#1F2937",
-            activebackground=colors["button_start_hover"],
-            activeforeground="#1F2937",
-            relief="flat",
-            padx=30,
-            pady=12,
+        # 2. Primary Action (Purchase)
+        self.btn_pay = RoundedButton(
+            self.inner_frame, 
+            text="Pay via Card", 
+            width=260, 
+            height=60, 
+            bg_color=COLORS["button_bg"], 
+            text_color="#FFFFFF", 
+            font_type="body_bold",
             command=self._on_purchase_click
         )
-        purchase_btn.pack(pady=(0, 15))
+        self.btn_pay.pack(pady=10)
         
         # Stripe availability warning
         if not STRIPE_AVAILABLE:
             stripe_warning = tk.Label(
-                card_frame,
+                self.inner_frame,
                 text="(Stripe SDK not installed)",
-                font=tkfont.Font(size=10),
-                fg=colors["status_gadget"],
-                bg=colors["bg_card"]
+                font=FONTS["small"],
+                fg=COLORS["status_gadget"],
+                bg=COLORS["surface"]
             )
             stripe_warning.pack(pady=(0, 10))
         elif not self.stripe.is_available():
             stripe_warning = tk.Label(
-                card_frame,
+                self.inner_frame,
                 text="(Payment not configured)",
-                font=tkfont.Font(size=10),
-                fg=colors["status_gadget"],
-                bg=colors["bg_card"]
+                font=FONTS["small"],
+                fg=COLORS["status_gadget"],
+                bg=COLORS["surface"]
             )
             stripe_warning.pack(pady=(0, 10))
         
-        # Divider
-        divider_frame = tk.Frame(card_frame, bg=colors["bg_card"])
-        divider_frame.pack(fill="x", pady=15)
+        # 3. Divider
+        div_frame = tk.Frame(self.inner_frame, bg=COLORS["surface"])
+        div_frame.pack(fill="x", pady=(25, 15), padx=15)
         
-        tk.Frame(divider_frame, bg=colors["border"], height=1).pack(side="left", fill="x", expand=True)
-        tk.Label(
-            divider_frame,
-            text=" OR ",
-            font=body_font,
-            fg=colors["text_secondary"],
-            bg=colors["bg_card"]
-        ).pack(side="left", padx=10)
-        tk.Frame(divider_frame, bg=colors["border"], height=1).pack(side="left", fill="x", expand=True)
+        tk.Frame(div_frame, bg=COLORS["border"], height=1).pack(side="left", fill="x", expand=True)
+        tk.Label(div_frame, text="OR", font=FONTS["small"], bg=COLORS["surface"], fg=COLORS["text_secondary"], padx=15).pack(side="left")
+        tk.Frame(div_frame, bg=COLORS["border"], height=1).pack(side="left", fill="x", expand=True)
         
-        # License key section
-        key_label = tk.Label(
-            card_frame,
-            text="Enter License Key",
-            font=body_font,
-            fg=colors["text_primary"],
-            bg=colors["bg_card"]
-        )
-        key_label.pack(pady=(10, 5))
+        # 4. License Key Section
+        tk.Label(self.inner_frame, text="Enter License Key", font=FONTS["body_bold"], bg=COLORS["surface"], fg=COLORS["text_primary"], anchor="w").pack(fill="x", pady=(10, 8), padx=15)
         
-        # Key entry frame
-        key_entry_frame = tk.Frame(card_frame, bg=colors["bg_card"])
-        key_entry_frame.pack(pady=(0, 10))
+        license_row = tk.Frame(self.inner_frame, bg=COLORS["surface"])
+        license_row.pack(fill="x", padx=15)
         
-        self.key_entry = tk.Entry(
-            key_entry_frame,
-            font=body_font,
-            width=27,
-            bg="white",
-            fg=colors["text_primary"],
-            insertbackground=colors["text_primary"],
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=1,
-            highlightcolor=colors["border"],
-            highlightbackground=colors["border"]
-        )
-        self.key_entry.pack(side="left", padx=(0, 20), ipady=2)
-        self.key_entry.bind("<Return>", lambda e: self._on_activate_key())
-        
-        # Activate button - green with black text (same as purchase button)
-        activate_key_btn = tk.Button(
-            key_entry_frame,
-            text="Activate",
-            font=body_font,
-            bg=colors["button_start"],
-            fg="#1F2937",
-            activebackground=colors["button_start_hover"],
-            activeforeground="#1F2937",
-            relief="flat",
-            width=8,
-            pady=5,
+        self.btn_activate = RoundedButton(
+            license_row, 
+            text="Activate", 
+            width=100, 
+            height=44, 
+            radius=12,
+            bg_color=COLORS["button_bg"], 
+            font_type="caption",
             command=self._on_activate_key
         )
-        activate_key_btn.pack(side="left")
+        self.btn_activate.pack(side="right", anchor="n")
         
-        # Session verification section (hidden by default)
-        self.verify_frame = tk.Frame(card_frame, bg=colors["bg_card"])
-        # Don't pack yet - will show after purchase initiated
+        self.key_entry = StyledEntry(license_row, placeholder="XXXX-XXXX-XXXX-XXXX")
+        self.key_entry.pack(side="left", fill="x", expand=True, padx=(0, 10), anchor="n")
+        self.key_entry.bind_return(self._on_activate_key)
+        self.key_entry.entry.bind("<Key>", self._clear_global_status, add="+")
         
-        verify_label = tk.Label(
-            self.verify_frame,
-            text="Enter Session ID from Stripe Checkout:",
-            font=body_font,
-            fg=colors["text_primary"],
-            bg=colors["bg_card"]
-        )
-        verify_label.pack(pady=(10, 5))
+        # 5. Stripe Session ID Section (always visible)
+        tk.Label(self.inner_frame, text="(Already paid?) Verify with Stripe session ID", font=FONTS["body"], bg=COLORS["surface"], fg=COLORS["text_secondary"], anchor="w").pack(fill="x", pady=(20, 8), padx=15)
         
-        verify_entry_frame = tk.Frame(self.verify_frame, bg=colors["bg_card"])
-        verify_entry_frame.pack(pady=(0, 10))
+        verify_row = tk.Frame(self.inner_frame, bg=COLORS["surface"])
+        verify_row.pack(fill="x", padx=15)
         
-        self.session_entry = tk.Entry(
-            verify_entry_frame,
-            font=body_font,
-            width=27,
-            bg="white",
-            fg=colors["text_primary"],
-            insertbackground=colors["text_primary"],
-            relief="solid",
-            borderwidth=1,
-            highlightthickness=1,
-            highlightcolor=colors["border"],
-            highlightbackground=colors["border"]
-        )
-        self.session_entry.pack(side="left", padx=(0, 20), ipady=2)
-        self.session_entry.bind("<Return>", lambda e: self._on_verify_payment())
-        
-        # Verify button - same style as Activate button
-        self.verify_button = tk.Button(
-            verify_entry_frame,
-            text="Verify",
-            font=body_font,
-            bg=colors["button_start"],
-            fg="#1F2937",
-            activebackground=colors["button_start_hover"],
-            activeforeground="#1F2937",
-            relief="flat",
-            width=8,
-            pady=5,
+        self.verify_button = RoundedButton(
+            verify_row, 
+            text="Verify", 
+            width=100, 
+            height=44, 
+            radius=12,
+            bg_color=COLORS["button_bg"], 
+            font_type="caption",
             command=self._on_verify_payment
         )
-        self.verify_button.pack(side="left")
+        self.verify_button.pack(side="right", anchor="n")
         
-        # Status message
+        self.session_entry = StyledEntry(verify_row, placeholder="cs_live_...")
+        self.session_entry.pack(side="left", fill="x", expand=True, padx=(0, 10), anchor="n")
+        self.session_entry.bind_return(self._on_verify_payment)
+        self.session_entry.entry.bind("<Key>", self._clear_global_status, add="+")
+        
+        # Status message (for non-input-specific messages like payment processing)
         self.status_label = tk.Label(
-            card_frame,
+            self.inner_frame,
             text="",
-            font=body_font,
-            fg=colors["text_secondary"],
-            bg=colors["bg_card"]
+            font=FONTS["body"],
+            fg=COLORS["text_secondary"],
+            bg=COLORS["surface"]
         )
-        self.status_label.pack(pady=(15, 0))
-        
-        # "I already paid" link (toggles session verification - emergency fallback)
-        self.already_paid_link = tk.Label(
-            card_frame,
-            text="Already paid? Verify manually",
-            font=tkfont.Font(size=11, underline=True),
-            fg=colors["accent_primary"],
-            bg=colors["bg_card"]
-        )
-        self.already_paid_link.pack(pady=(15, 0))
-        self.already_paid_link.bind("<Button-1>", lambda e: self._toggle_verify_section())
+        self.status_label.pack(pady=(5, 0))
         
         # Skip for development (only if configured)
         if getattr(config, 'SKIP_LICENSE_CHECK', False):
             skip_label = tk.Label(
-                center_frame,
+                self.center_container,
                 text="[Development Mode - Click to Skip]",
                 font=tkfont.Font(size=10, underline=True),
-                fg=colors["text_secondary"],
-                bg=colors["bg_primary"]
+                fg=COLORS["text_secondary"],
+                bg=COLORS["bg"]
             )
             skip_label.pack(pady=(20, 0))
             skip_label.bind("<Button-1>", lambda e: self._skip_for_dev())
-    
-    def _toggle_verify_section(self):
-        """Toggle the session verification section visibility."""
-        if self._verify_section_visible:
-            # Hide the section
-            self.verify_frame.pack_forget()
-            self._verify_section_visible = False
-        else:
-            # Show the section
-            self.verify_frame.pack(pady=(10, 0))
-            self._verify_section_visible = True
-            # Force a proper redraw to fix rendering issues
-            self.verify_frame.update_idletasks()
-            self.root.update_idletasks()
-    
-    def _show_verify_section(self):
-        """Show the session verification section (for programmatic use)."""
-        if not self._verify_section_visible:
-            self._toggle_verify_section()
     
     def _update_status(self, message: str, is_error: bool = False, is_success: bool = False):
         """
@@ -684,14 +543,33 @@ class PaymentScreen:
             is_error: Whether this is an error message (red).
             is_success: Whether this is a success message (green).
         """
-        colors = get_colors()
+        # Handle input-specific messages
+        if "license key" in message.lower() and self.key_entry:
+            if is_error:
+                self.key_entry.show_error(message)
+            elif is_success:
+                self.key_entry.show_success(message)
+            else:
+                self.key_entry.show_info(message)
+            return
+            
+        if "session id" in message.lower() and self.session_entry:
+            if is_error:
+                self.session_entry.show_error(message)
+            elif is_success:
+                self.session_entry.show_success(message)
+            else:
+                self.session_entry.show_info(message)
+            return
+
+        # For other messages (success, polling, etc), use the global status label
         if self.status_label:
             if is_error:
-                color = colors["status_gadget"]  # Red
+                color = COLORS["status_gadget"]  # Red
             elif is_success:
-                color = colors["button_start"]  # Green
+                color = COLORS["button_start"]  # Green
             else:
-                color = colors["text_secondary"]  # Gray
+                color = COLORS["text_secondary"]  # Gray
             
             self.status_label.config(text=message, fg=color)
     
@@ -931,8 +809,6 @@ class PaymentScreen:
             if error:
                 # Browser failed but we have session ID
                 self._update_status(error, is_error=True)
-                # Show verify section as fallback
-                self._show_verify_section()
             else:
                 # Normal flow - show waiting message
                 self._update_status(
@@ -950,8 +826,6 @@ class PaymentScreen:
         if not self.stripe.is_available():
             self._update_status("Cannot verify - Stripe not configured", is_error=True)
             return
-        
-        self._update_status("Verifying payment...")
         
         # Verify in background thread
         def verify():
@@ -987,7 +861,8 @@ class PaymentScreen:
             self.root.after(1000, self._activation_success)
         else:
             error = info.get("error", "Payment not completed")
-            self._update_status(f"Verification failed: {error}", is_error=True)
+            # Include "session id" in message to route to input field
+            self._update_status("Invalid session ID", is_error=True)
     
     def _on_activate_key(self):
         """Handle license key activation."""
@@ -996,8 +871,6 @@ class PaymentScreen:
         if not key:
             self._update_status("Please enter a license key", is_error=True)
             return
-        
-        self._update_status("Validating license key...")
         
         # Validate and activate
         if self.license_manager.activate_with_key(key):

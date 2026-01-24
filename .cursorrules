@@ -44,17 +44,22 @@ braindock/
 ├── config.py                  # All configuration constants
 ├── gui/
 │   ├── __init__.py
-│   └── app.py                # Desktop GUI application (tkinter)
+│   ├── app.py                # Desktop GUI application (tkinter)
+│   ├── payment_screen.py     # License/payment screen
+│   └── ui_components.py      # Reusable UI components
 ├── camera/
 │   ├── capture.py            # Webcam management (OpenCV)
-│   ├── vision_detector.py    # AI-powered detection (OpenAI Vision API)
-│   ├── detection.py          # Legacy (not used)
-│   └── phone_detector.py     # Legacy (not used)
+│   └── vision_detector.py    # AI-powered detection (OpenAI Vision API)
 ├── tracking/
 │   ├── session.py            # Session class with event logging
-│   └── analytics.py          # Statistics computation
-├── ai/
-│   └── summariser.py         # OpenAI GPT integration for summaries
+│   ├── analytics.py          # Statistics computation
+│   └── usage_limiter.py      # MVP usage time tracking
+├── screen/
+│   ├── window_detector.py    # Screen/window monitoring
+│   └── blocklist.py          # Distraction blocklist management
+├── licensing/
+│   ├── license_manager.py    # License validation
+│   └── stripe_integration.py # Payment processing
 ├── reporting/
 │   └── pdf_report.py         # PDF generation (ReportLab)
 ├── data/sessions/            # JSON session files
@@ -149,12 +154,7 @@ REPORTS_DIR = BASE_DIR / "reports"
 - Math MUST add up: present + away + gadget = total
 - Event consolidation (merge consecutive similar events)
 - Time formatting helpers
-
-### ai/summariser.py
-- Generate summaries using OpenAI GPT API
-- Direct, factual tone (not overly encouraging)
-- Retry logic with exponential backoff
-- Handle both JSON-supporting and non-JSON models
+- generate_summary_text() provides fallback summary if needed
 
 ### reporting/pdf_report.py
 - Professional PDF generation using ReportLab
@@ -218,10 +218,11 @@ display_time = _format_time(minutes)
 ### Unit Tests
 - Session tracking: tests/test_session.py
 - Analytics: tests/test_analytics.py
+- PDF generation: tests/test_pdf_report.py
 - Run with: `python3 -m unittest tests.test_session`
 
 ### Integration Tests
-- test_openai.py: Tests OpenAI API integration
+- test_gadget_detection.py: Interactive Vision API testing with camera
 - Manual testing: camera detection, PDF generation
 
 ### Manual Testing Checklist

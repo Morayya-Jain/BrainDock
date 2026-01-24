@@ -3,11 +3,14 @@
 import cv2
 import numpy as np
 import base64
+import json
 import logging
-from typing import Dict, Optional, List
-from openai import OpenAI
-import config
 import time
+from typing import Dict, Optional
+
+from openai import OpenAI
+
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +213,6 @@ RULES:
                 content = content[start:end]
             
             # Parse JSON response
-            import json
             try:
                 result = json.loads(content)
             except json.JSONDecodeError as e:
