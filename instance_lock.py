@@ -18,8 +18,60 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Lock file location - in the data directory
-LOCK_FILE = Path(__file__).parent / "data" / ".braindock_instance.lock"
+
+def _get_lock_file_path() -> Path:
+    """
+    Get the lock file path, using the appropriate directory for bundled apps.
+    
+    Returns:
+        Path to the lock file in a persistent, writable location.
+    """
+    # Import here to avoid circular imports
+    try:
+        from config import USER_DATA_DIR
+        return USER_DATA_DIR / ".braindock_instance.lock"
+    except ImportError:
+        # Fallback if config not available
+        return Path(__file__).parent / "data" / ".braindock_instance.lock"
+
+
+def _is_process_running(pid: int) -> bool:
+    """
+    Check if a process with the given PID is currently running.
+    
+    Args:
+        pid: Process ID to check.
+        
+    Returns:
+        True if the process is running, False otherwise.
+    """
+    if pid <= 0:
+        return False
+    
+    try:
+        if sys.platform == 'win32':
+            # Windows: Use ctypes to check process
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if handle:
+                kernel32.CloseHandle(handle)
+                return True
+            return False
+        else:
+            # Unix: Send signal 0 to check if process exists
+            os.kill(pid, 0)
+            return True
+    except (OSError, ProcessLookupError):
+        return False
+    except Exception:
+        # On any error, assume process might be running (safe default)
+        return True
+
+
+# Lock file location - determined at runtime
+LOCK_FILE = _get_lock_file_path()
 
 
 class InstanceLock:
@@ -49,18 +101,14 @@ class InstanceLock:
         self._lock_handle: Optional[object] = None
         self._acquired = False
     
-    def acquire(self) -> bool:
+    def _try_acquire_lock(self) -> bool:
         """
-        Try to acquire the instance lock.
+        Internal method to attempt lock acquisition.
         
         Returns:
-            True if lock acquired (no other instance running)
-            False if another instance is already running
+            True if lock acquired, False otherwise.
         """
         try:
-            # Ensure directory exists
-            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
-            
             # Open/create lock file (must keep handle open for lock to persist)
             self._lock_handle = open(self.lock_file, 'w')
             
@@ -71,9 +119,8 @@ class InstanceLock:
                 try:
                     # Lock first byte of file (non-blocking)
                     msvcrt.locking(self._lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    self._acquired = True
+                    return True
                 except IOError:
-                    # Lock failed - another instance has it
                     self._lock_handle.close()
                     self._lock_handle = None
                     return False
@@ -83,19 +130,102 @@ class InstanceLock:
                 try:
                     # LOCK_EX = exclusive lock, LOCK_NB = non-blocking
                     fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    self._acquired = True
+                    return True
                 except (IOError, OSError):
-                    # Lock failed - another instance has it
                     self._lock_handle.close()
                     self._lock_handle = None
                     return False
+        except Exception:
+            if self._lock_handle:
+                try:
+                    self._lock_handle.close()
+                except Exception:
+                    pass
+                self._lock_handle = None
+            return False
+    
+    def _check_and_clean_stale_lock(self) -> bool:
+        """
+        Check if the existing lock is stale (process no longer running).
+        If stale, clean up and return True so we can retry.
+        
+        Returns:
+            True if stale lock was cleaned up, False otherwise.
+        """
+        try:
+            if not self.lock_file.exists():
+                return False
             
-            # Write PID for debugging/diagnostics
-            self._lock_handle.write(str(os.getpid()))
-            self._lock_handle.flush()
+            # Read the PID from the lock file
+            content = self.lock_file.read_text().strip()
+            if not content.isdigit():
+                # Invalid content, try to remove
+                logger.debug("Lock file has invalid content, removing...")
+                self.lock_file.unlink()
+                return True
             
-            logger.debug(f"Instance lock acquired (PID: {os.getpid()})")
+            old_pid = int(content)
+            
+            # Don't remove if it's our own PID (shouldn't happen, but safety check)
+            if old_pid == os.getpid():
+                return False
+            
+            # Check if the process is still running
+            if _is_process_running(old_pid):
+                logger.debug(f"Process {old_pid} is still running")
+                return False
+            
+            # Process is not running - this is a stale lock
+            logger.info(f"Removing stale lock from dead process {old_pid}")
+            try:
+                self.lock_file.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to remove stale lock file: {e}")
+                return False
+            
             return True
+            
+        except Exception as e:
+            logger.debug(f"Error checking stale lock: {e}")
+            return False
+    
+    def acquire(self) -> bool:
+        """
+        Try to acquire the instance lock.
+        
+        Includes stale lock detection: if the lock file exists but the
+        process that created it is no longer running, the stale lock
+        is automatically cleaned up.
+        
+        Returns:
+            True if lock acquired (no other instance running)
+            False if another instance is already running
+        """
+        try:
+            # Ensure directory exists
+            self.lock_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            # First attempt to acquire lock
+            if self._try_acquire_lock():
+                self._acquired = True
+                # Write PID for debugging/diagnostics
+                self._lock_handle.write(str(os.getpid()))
+                self._lock_handle.flush()
+                logger.debug(f"Instance lock acquired (PID: {os.getpid()})")
+                return True
+            
+            # Lock failed - check if it's a stale lock from a dead process
+            if self._check_and_clean_stale_lock():
+                # Stale lock cleaned up, try again
+                if self._try_acquire_lock():
+                    self._acquired = True
+                    self._lock_handle.write(str(os.getpid()))
+                    self._lock_handle.flush()
+                    logger.info("Instance lock acquired after cleaning stale lock")
+                    return True
+            
+            # Another instance is genuinely running
+            return False
             
         except Exception as e:
             logger.warning(f"Error acquiring instance lock: {e}")
@@ -204,8 +334,9 @@ def get_existing_pid() -> Optional[int]:
         PID of existing instance, or None if not readable
     """
     try:
-        if LOCK_FILE.exists():
-            content = LOCK_FILE.read_text().strip()
+        lock_file = _get_lock_file_path()
+        if lock_file.exists():
+            content = lock_file.read_text().strip()
             if content.isdigit():
                 return int(content)
     except Exception:
