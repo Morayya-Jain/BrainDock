@@ -1,3 +1,7 @@
+---
+title: Terms and Conditions
+---
+
 # Terms and Conditions
 
 **BrainDock Focus Tracking Application**
