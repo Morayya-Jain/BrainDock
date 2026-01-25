@@ -134,16 +134,20 @@ class StyledEntry(tk.Frame):
     def __init__(self, parent, placeholder="", width=200):
         super().__init__(parent, bg=COLORS["surface"])
         self.placeholder = placeholder
+        self.radius = 12  # Slightly rounded corners
         
-        # Container for visual styling
-        self.container = tk.Frame(self, bg=COLORS["input_bg"], padx=15, pady=10)
-        self.container.pack(fill="x")
+        # Canvas for the input area (replacing Frame container)
+        self.canvas = tk.Canvas(self, bg=COLORS["surface"], height=50, highlightthickness=0)
+        self.canvas.pack(fill="x")
         
         # Entry widget
-        self.entry = tk.Entry(self.container, font=FONTS["input"], bg=COLORS["input_bg"], 
+        self.entry = tk.Entry(self.canvas, font=FONTS["input"], bg=COLORS["input_bg"], 
                             fg=COLORS["text_primary"], relief="flat", highlightthickness=0,
                             insertbackground=COLORS["text_primary"])  # Black cursor
-        self.entry.pack(fill="x")
+        
+        # Initial draw will happen on configure, but we need to create the window item once
+        self.entry_window = self.canvas.create_window(0, 0, window=self.entry, anchor="nw")
+        
         self.entry.insert(0, placeholder)
         self.entry.config(fg=COLORS["text_secondary"])
         
@@ -152,10 +156,6 @@ class StyledEntry(tk.Frame):
         self.entry.bind("<Return>", self._on_return)
         self.entry.bind("<Key>", self._on_key_press)
         
-        # Bottom border (animated later maybe)
-        self.border = tk.Frame(self, bg=COLORS["border"], height=2)
-        self.border.pack(fill="x")
-        
         # Error label - always packed to reserve space, empty text when no error
         self.error_label = tk.Label(self, text=" ", font=("Helvetica", 11), fg=COLORS["status_gadget"], 
                                    bg=COLORS["surface"], anchor="w", wraplength=300, justify="left", height=1)
@@ -163,25 +163,64 @@ class StyledEntry(tk.Frame):
         
         self.command = None
         self._has_feedback = False
+        self.current_border_color = COLORS["input_bg"] # Default invisible border
+        
+        # Bind resize event
+        self.canvas.bind("<Configure>", self._draw)
+
+    def _draw(self, event=None):
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        
+        # Avoid drawing if too small
+        if w < 20: return
+            
+        self.canvas.delete("bg_rect")
+        
+        # Draw rounded background
+        # Tag it 'bg_rect' so we can delete/update it
+        self.create_rounded_rect(2, 2, w-2, h-2, self.radius, fill=COLORS["input_bg"], outline=self.current_border_color, width=2, tags="bg_rect")
+        
+        # Ensure entry is on top
+        self.canvas.tag_lower("bg_rect")
+        
+        # Position entry
+        # Padding: x=15, y=10 (approximate centering)
+        entry_h = self.entry.winfo_reqheight()
+        entry_y = (h - entry_h) // 2
+        self.canvas.coords(self.entry_window, 15, entry_y)
+        self.canvas.itemconfigure(self.entry_window, width=w-30)
+
+    def create_rounded_rect(self, x1, y1, x2, y2, r, **kwargs):
+        points = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2, x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return self.canvas.create_polygon(points, smooth=True, **kwargs)
 
     def show_error(self, message):
         self.error_label.config(text=message, fg=COLORS["status_gadget"])
-        self.border.config(bg=COLORS["status_gadget"])
+        self.current_border_color = COLORS["status_gadget"]
+        self._draw()
         self._has_feedback = True
 
     def show_success(self, message):
         self.error_label.config(text=message, fg=COLORS["button_start"])
-        self.border.config(bg=COLORS["button_start"])
+        self.current_border_color = COLORS["button_start"]
+        self._draw()
         self._has_feedback = True
         
     def show_info(self, message):
         self.error_label.config(text=message, fg=COLORS["text_secondary"])
-        self.border.config(bg=COLORS["accent"])
+        self.current_border_color = COLORS["accent"]
+        self._draw()
         self._has_feedback = True
 
     def clear_error(self):
         self.error_label.config(text=" ")  # Keep space reserved
-        self.border.config(bg=COLORS["accent"] if self.entry.focus_get() == self.entry else COLORS["border"])
+        # If focused, show accent border, else default
+        if self.entry.focus_get() == self.entry:
+            self.current_border_color = COLORS["accent"]
+        else:
+            self.current_border_color = COLORS["input_bg"]
+        self._draw()
         self._has_feedback = False
 
     def _on_focus_in(self, event):
@@ -189,7 +228,8 @@ class StyledEntry(tk.Frame):
         if self.entry.get() == self.placeholder:
             self.entry.delete(0, "end")
             self.entry.config(fg=COLORS["text_primary"])
-        self.border.config(bg=COLORS["accent"])
+        self.current_border_color = COLORS["accent"]
+        self._draw()
         
     def _on_key_press(self, event):
         self.clear_error()
@@ -200,7 +240,8 @@ class StyledEntry(tk.Frame):
             self.entry.config(fg=COLORS["text_secondary"])
         # Only reset border if no feedback is showing
         if not self._has_feedback:
-            self.border.config(bg=COLORS["border"])
+            self.current_border_color = COLORS["input_bg"]
+            self._draw()
         
     def _on_return(self, event):
         if self.command:
