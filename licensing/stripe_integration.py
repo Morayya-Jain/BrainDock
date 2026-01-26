@@ -6,6 +6,9 @@ and promo code handling.
 """
 
 import logging
+import os
+import subprocess
+import sys
 import webbrowser
 from typing import Optional, Dict, Any, Tuple
 
@@ -225,15 +228,60 @@ class StripeIntegration:
         # result contains the checkout URL
         checkout_url = result
         
+        open_error = self._open_checkout_url(checkout_url)
+        if open_error:
+            return session_id, open_error
+        
+        logger.info("Opened Stripe checkout in browser")
+        return session_id, None
+
+    def _open_checkout_url(self, checkout_url: str) -> Optional[str]:
+        """
+        Open the checkout URL in the default browser with fallbacks.
+        
+        Args:
+            checkout_url: The Stripe Checkout URL to open.
+        
+        Returns:
+            None if opened successfully, otherwise an error message.
+        """
         try:
-            webbrowser.open(checkout_url)
-            logger.info("Opened Stripe checkout in browser")
-            return session_id, None
+            opened = webbrowser.open(checkout_url, new=2)
+            if opened:
+                return None
+            logger.warning("webbrowser.open returned False")
         except Exception as e:
-            error_msg = f"Failed to open browser: {e}"
-            logger.warning(error_msg)
-            # Still return session_id - user can manually navigate
-            return session_id, f"Browser failed to open. Please visit: {checkout_url}"
+            logger.warning(f"webbrowser.open failed: {e}")
+        
+        try:
+            if sys.platform == "darwin":
+                opener = "/usr/bin/open"
+                if os.path.exists(opener):
+                    subprocess.Popen([opener, checkout_url])
+                    return None
+                logger.error(f"Browser opener not found: {opener}")
+            
+            if sys.platform.startswith("win"):
+                try:
+                    os.startfile(checkout_url)  # type: ignore[attr-defined]
+                    return None
+                except Exception as e:
+                    logger.error(f"Windows browser open failed: {e}")
+            
+            linux_candidates = ["/usr/bin/xdg-open", "/usr/bin/gio"]
+            for candidate in linux_candidates:
+                if os.path.exists(candidate):
+                    if candidate.endswith("gio"):
+                        subprocess.Popen([candidate, "open", checkout_url])
+                    else:
+                        subprocess.Popen([candidate, checkout_url])
+                    return None
+            
+            logger.error("No supported browser opener found")
+        except Exception as e:
+            logger.error(f"Fallback browser open failed: {e}")
+        
+        return f"Browser failed to open. Please visit: {checkout_url}"
     
     def validate_promo_code(self, promo_code: str) -> Tuple[bool, Dict[str, Any]]:
         """
