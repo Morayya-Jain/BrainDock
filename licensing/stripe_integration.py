@@ -203,8 +203,9 @@ def _fix_ssl_certificates():
                 # Set secure defaults (matching what create_default_context does)
                 ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
                 
-                # Load certificates - use provided cafile or our bundled cert
-                actual_cafile = cafile if cafile else cert_path
+                # Load certificates - ALWAYS use our bundled cert (ignore cafile param)
+                # Stripe passes its own ca-certificates.crt path which doesn't exist in bundle
+                actual_cafile = cert_path
                 file_exists = os.path.exists(actual_cafile) if actual_cafile else False
                 # #region agent log
                 _debug_log("G", "stripe_integration.py:before_load_verify", "About to load_verify_locations", {"actual_cafile": actual_cafile, "file_exists": file_exists, "capath": capath, "cadata_len": len(cadata) if cadata else 0})
