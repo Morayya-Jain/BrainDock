@@ -772,16 +772,23 @@ class PaymentScreen:
             # Open Stripe checkout in background thread
             def open_checkout():
                 try:
+                    logger.info("Starting Stripe checkout session creation...")
                     session_id, error = self.stripe.open_checkout(
                         success_url=success_url,
                         cancel_url=cancel_url
                     )
+                    logger.info(f"Checkout result: session_id={session_id is not None}, error={error}")
                     
                     # Update UI from main thread
                     self.root.after(0, lambda: self._handle_checkout_result(session_id, error))
                 except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
                     logger.error(f"Error in open_checkout thread: {e}")
-                    self.root.after(0, lambda: self._handle_checkout_result(None, str(e)))
+                    logger.error(f"Full traceback:\n{error_details}")
+                    # Include traceback info in error message for debugging
+                    error_msg = f"{type(e).__name__}: {e}"
+                    self.root.after(0, lambda: self._handle_checkout_result(None, error_msg))
             
             thread = threading.Thread(target=open_checkout, daemon=True)
             thread.start()

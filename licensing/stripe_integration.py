@@ -9,10 +9,114 @@ import logging
 import os
 import subprocess
 import sys
+import traceback
 import webbrowser
 from typing import Optional, Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
+
+# Fix SSL certificates for bundled apps (PyInstaller)
+# This must be done BEFORE importing stripe
+def _fix_ssl_certificates():
+    """
+    Fix SSL certificate paths for PyInstaller bundles.
+    
+    PyInstaller bundles may not find the SSL certificates properly.
+    This sets the SSL_CERT_FILE environment variable to help.
+    Works on both macOS and Windows.
+    """
+    cert_path = None
+    
+    # First, check if we're in a PyInstaller bundle and look for bundled certs
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running in a PyInstaller bundle
+        bundle_dir = sys._MEIPASS
+        bundled_cert = os.path.join(bundle_dir, 'certifi', 'cacert.pem')
+        if os.path.exists(bundled_cert):
+            cert_path = bundled_cert
+            logger.debug(f"Using bundled SSL certificates: {cert_path}")
+    
+    # If not found in bundle, try certifi module
+    if not cert_path:
+        try:
+            import certifi
+            cert_path = certifi.where()
+            if os.path.exists(cert_path):
+                logger.debug(f"Using certifi SSL certificates: {cert_path}")
+            else:
+                cert_path = None
+        except ImportError:
+            pass
+    
+    # Platform-specific fallback locations
+    if not cert_path:
+        if sys.platform == "darwin":
+            # macOS certificate locations
+            macos_certs = [
+                '/etc/ssl/cert.pem',
+                '/usr/local/etc/openssl/cert.pem',
+                '/usr/local/etc/openssl@1.1/cert.pem',
+                '/opt/homebrew/etc/openssl/cert.pem',
+                '/opt/homebrew/etc/openssl@3/cert.pem',
+            ]
+            for path in macos_certs:
+                if os.path.exists(path):
+                    cert_path = path
+                    logger.debug(f"Using macOS system SSL certificates: {cert_path}")
+                    break
+        
+        elif sys.platform == "win32":
+            # Windows certificate locations
+            # Try common locations where certificates might be found
+            import ssl
+            try:
+                # Try to get the default certificate path from ssl module
+                default_paths = ssl.get_default_verify_paths()
+                if default_paths.cafile and os.path.exists(default_paths.cafile):
+                    cert_path = default_paths.cafile
+                    logger.debug(f"Using Windows SSL default certificates: {cert_path}")
+            except Exception:
+                pass
+            
+            if not cert_path:
+                # Try common Windows locations
+                windows_certs = []
+                
+                # Python installation directory
+                python_dir = os.path.dirname(sys.executable)
+                windows_certs.extend([
+                    os.path.join(python_dir, 'Lib', 'site-packages', 'certifi', 'cacert.pem'),
+                    os.path.join(python_dir, 'certifi', 'cacert.pem'),
+                ])
+                
+                # AppData locations
+                appdata = os.environ.get('APPDATA', '')
+                localappdata = os.environ.get('LOCALAPPDATA', '')
+                if appdata:
+                    windows_certs.append(os.path.join(appdata, 'Python', 'cacert.pem'))
+                if localappdata:
+                    windows_certs.append(os.path.join(localappdata, 'Programs', 'Python', 'cacert.pem'))
+                
+                for path in windows_certs:
+                    if os.path.exists(path):
+                        cert_path = path
+                        logger.debug(f"Using Windows SSL certificates: {cert_path}")
+                        break
+    
+    if cert_path:
+        os.environ['SSL_CERT_FILE'] = cert_path
+        os.environ['REQUESTS_CA_BUNDLE'] = cert_path
+        os.environ['CURL_CA_BUNDLE'] = cert_path
+        logger.info(f"SSL certificates configured: {cert_path}")
+    else:
+        # On Windows, the system certificate store is often used automatically
+        if sys.platform == "win32":
+            logger.debug("No explicit SSL cert path found - Windows will use system certificate store")
+        else:
+            logger.warning("Could not find SSL certificates - HTTPS requests may fail")
+
+# Apply SSL fix before importing stripe
+_fix_ssl_certificates()
 
 # Stripe SDK - imported conditionally to handle missing dependency gracefully
 try:
@@ -134,11 +238,19 @@ class StripeIntegration:
         except stripe.error.StripeError as e:
             error_msg = str(e)
             logger.error(f"Stripe error creating checkout session: {error_msg}")
-            return None, error_msg
+            logger.debug(f"Stripe error traceback: {traceback.format_exc()}")
+            return None, f"Payment service error: {error_msg}"
+        except FileNotFoundError as e:
+            # This can happen if SSL certificates are not found
+            error_msg = f"File not found: {e}"
+            logger.error(f"FileNotFoundError in checkout session: {error_msg}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return None, "Payment service configuration error. Please try again."
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error creating checkout session: {error_msg}")
-            return None, error_msg
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return None, f"Error: {error_msg}"
     
     def verify_session(self, session_id: str) -> Tuple[bool, Dict[str, Any]]:
         """
@@ -239,49 +351,133 @@ class StripeIntegration:
         """
         Open the checkout URL in the default browser with fallbacks.
         
+        Uses multiple methods to ensure URL opens even in sandboxed/bundled apps.
+        
         Args:
             checkout_url: The Stripe Checkout URL to open.
         
         Returns:
             None if opened successfully, otherwise an error message.
         """
+        errors = []
+        
+        # Method 1: macOS - Use AppleScript via osascript (most reliable for bundled apps)
+        if sys.platform == "darwin":
+            try:
+                # AppleScript command to open URL in default browser
+                script = f'open location "{checkout_url}"'
+                result = subprocess.run(
+                    ["/usr/bin/osascript", "-e", script],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    logger.info("Opened URL via AppleScript")
+                    return None
+                else:
+                    errors.append(f"AppleScript failed: {result.stderr}")
+                    logger.warning(f"AppleScript failed: {result.stderr}")
+            except Exception as e:
+                errors.append(f"AppleScript error: {e}")
+                logger.warning(f"AppleScript error: {e}")
+            
+            # Method 2: macOS - Use /usr/bin/open directly
+            try:
+                result = subprocess.run(
+                    ["/usr/bin/open", checkout_url],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    logger.info("Opened URL via /usr/bin/open")
+                    return None
+                else:
+                    errors.append(f"/usr/bin/open failed: {result.stderr}")
+                    logger.warning(f"/usr/bin/open failed: {result.stderr}")
+            except Exception as e:
+                errors.append(f"/usr/bin/open error: {e}")
+                logger.warning(f"/usr/bin/open error: {e}")
+        
+        # Method 3: Windows - Multiple fallback approaches
+        if sys.platform.startswith("win"):
+            # Method 3a: os.startfile (most common)
+            try:
+                os.startfile(checkout_url)  # type: ignore[attr-defined]
+                logger.info("Opened URL via os.startfile")
+                return None
+            except Exception as e:
+                errors.append(f"Windows startfile error: {e}")
+                logger.warning(f"Windows startfile error: {e}")
+            
+            # Method 3b: Use 'start' command via cmd.exe
+            try:
+                # 'start' command opens URL in default browser
+                result = subprocess.run(
+                    ['cmd', '/c', 'start', '', checkout_url],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    shell=False
+                )
+                if result.returncode == 0:
+                    logger.info("Opened URL via cmd start")
+                    return None
+                else:
+                    errors.append(f"cmd start failed: {result.stderr}")
+                    logger.warning(f"cmd start failed: {result.stderr}")
+            except Exception as e:
+                errors.append(f"cmd start error: {e}")
+                logger.warning(f"cmd start error: {e}")
+            
+            # Method 3c: Use PowerShell Start-Process
+            try:
+                result = subprocess.run(
+                    ['powershell', '-Command', f'Start-Process "{checkout_url}"'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    shell=False
+                )
+                if result.returncode == 0:
+                    logger.info("Opened URL via PowerShell")
+                    return None
+                else:
+                    errors.append(f"PowerShell failed: {result.stderr}")
+                    logger.warning(f"PowerShell failed: {result.stderr}")
+            except Exception as e:
+                errors.append(f"PowerShell error: {e}")
+                logger.warning(f"PowerShell error: {e}")
+        
+        # Method 4: Linux
+        if sys.platform.startswith("linux"):
+            for cmd in ["/usr/bin/xdg-open", "/usr/bin/gio"]:
+                if os.path.exists(cmd):
+                    try:
+                        args = [cmd, "open", checkout_url] if cmd.endswith("gio") else [cmd, checkout_url]
+                        subprocess.Popen(args)
+                        logger.info(f"Opened URL via {cmd}")
+                        return None
+                    except Exception as e:
+                        errors.append(f"{cmd} error: {e}")
+                        logger.warning(f"{cmd} error: {e}")
+        
+        # Method 5: Python webbrowser module (last resort)
         try:
             opened = webbrowser.open(checkout_url, new=2)
             if opened:
+                logger.info("Opened URL via webbrowser module")
                 return None
-            logger.warning("webbrowser.open returned False")
+            errors.append("webbrowser.open returned False")
         except Exception as e:
-            logger.warning(f"webbrowser.open failed: {e}")
+            errors.append(f"webbrowser error: {e}")
+            logger.warning(f"webbrowser error: {e}")
         
-        try:
-            if sys.platform == "darwin":
-                opener = "/usr/bin/open"
-                if os.path.exists(opener):
-                    subprocess.Popen([opener, checkout_url])
-                    return None
-                logger.error(f"Browser opener not found: {opener}")
-            
-            if sys.platform.startswith("win"):
-                try:
-                    os.startfile(checkout_url)  # type: ignore[attr-defined]
-                    return None
-                except Exception as e:
-                    logger.error(f"Windows browser open failed: {e}")
-            
-            linux_candidates = ["/usr/bin/xdg-open", "/usr/bin/gio"]
-            for candidate in linux_candidates:
-                if os.path.exists(candidate):
-                    if candidate.endswith("gio"):
-                        subprocess.Popen([candidate, "open", checkout_url])
-                    else:
-                        subprocess.Popen([candidate, checkout_url])
-                    return None
-            
-            logger.error("No supported browser opener found")
-        except Exception as e:
-            logger.error(f"Fallback browser open failed: {e}")
-        
-        return f"Browser failed to open. Please visit: {checkout_url}"
+        # All methods failed
+        error_details = "; ".join(errors) if errors else "Unknown error"
+        logger.error(f"All browser open methods failed: {error_details}")
+        return f"Could not open browser. Please copy this URL: {checkout_url}"
     
     def validate_promo_code(self, promo_code: str) -> Tuple[bool, Dict[str, Any]]:
         """
