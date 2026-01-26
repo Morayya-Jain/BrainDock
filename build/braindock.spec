@@ -47,6 +47,15 @@ datas = [
 # Note: SSL certificates are handled automatically by PyInstaller's certifi hook
 # (hook-certifi.py from pyinstaller-hooks-contrib)
 
+# Add Stripe's certificate bundle (required for httpx SSL connections)
+try:
+    import stripe
+    stripe_data_path = os.path.join(os.path.dirname(stripe.__file__), 'data')
+    if os.path.exists(stripe_data_path):
+        datas.append((stripe_data_path, 'stripe/data'))
+except ImportError:
+    pass
+
 # Hidden imports - modules that PyInstaller might miss
 hiddenimports = [
     # Bundled API keys module (generated at build time)
