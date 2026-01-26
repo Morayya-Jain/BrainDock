@@ -172,21 +172,38 @@ def _fix_ssl_certificates():
             pass
         
         # CRITICAL: Patch ssl.create_default_context to use our certificate file
-        # This is what stripe/httpx actually uses internally, and it ignores env vars
+        # This is what stripe/httpx actually uses internally
+        # We must NOT call the original function because it tries to load_default_certs()
+        # which looks for system OpenSSL paths that don't exist in bundled apps
         import ssl
-        _original_create_default_context = ssl.create_default_context
         
         def _patched_create_default_context(purpose=ssl.Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):
-            """Patched ssl.create_default_context that uses our certificate file."""
-            # If no cafile specified, use our certificate
-            if cafile is None and capath is None and cadata is None:
-                cafile = cert_path
-            ctx = _original_create_default_context(purpose, cafile=cafile, capath=capath, cadata=cadata)
+            """Patched ssl.create_default_context that creates context manually."""
+            # Create SSLContext with appropriate protocol
+            if purpose == ssl.Purpose.SERVER_AUTH:
+                # Client verifying server
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ctx.verify_mode = ssl.CERT_REQUIRED
+                ctx.check_hostname = True
+            else:
+                # Server context
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ctx.verify_mode = ssl.CERT_NONE
+                ctx.check_hostname = False
+            
+            # Set secure defaults (matching what create_default_context does)
+            ctx.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
+            
+            # Load certificates - use provided cafile or our bundled cert
+            actual_cafile = cafile if cafile else cert_path
+            if actual_cafile or capath or cadata:
+                ctx.load_verify_locations(actual_cafile, capath, cadata)
+            
             return ctx
         
         ssl.create_default_context = _patched_create_default_context
         # #region agent log
-        _debug_log("F", "stripe_integration.py:ssl_patched", "Patched ssl.create_default_context()", {"cert_path": cert_path})
+        _debug_log("F", "stripe_integration.py:ssl_patched", "Patched ssl.create_default_context() - manual context", {"cert_path": cert_path})
         # #endregion
         logger.debug("Patched ssl.create_default_context to use correct certificates")
         
