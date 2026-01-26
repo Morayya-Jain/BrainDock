@@ -150,8 +150,7 @@ echo -e "${YELLOW}Cleaning previous builds...${NC}"
 rm -rf "$PROJECT_ROOT/dist/BrainDock"
 rm -rf "$PROJECT_ROOT/dist/BrainDock.app"
 rm -rf "$PROJECT_ROOT/build/BrainDock"
-# Clean previously generated bundled_keys.py (will be regenerated with fresh keys)
-rm -f "$PROJECT_ROOT/bundled_keys.py"
+# NOTE: Don't delete bundled_keys.py here - it was just generated above!
 echo -e "${GREEN}Cleaned.${NC}"
 
 # Run PyInstaller
@@ -273,6 +272,9 @@ else
     echo "Check the output above for errors."
     exit 1
 fi
+
+# Clean up bundled_keys.py after build (contains secrets - don't commit)
+rm -f "$PROJECT_ROOT/bundled_keys.py"
 
 # Deactivate virtual environment
 deactivate

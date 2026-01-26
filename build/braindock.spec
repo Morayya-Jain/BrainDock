@@ -44,6 +44,13 @@ datas = [
     (str(PROJECT_ROOT / 'legal'), 'legal'),
 ]
 
+# Add bundled_keys.py if it exists (generated at build time with API keys)
+bundled_keys_path = PROJECT_ROOT / 'bundled_keys.py'
+if bundled_keys_path.exists():
+    datas.append((str(bundled_keys_path), '.'))
+else:
+    print("WARNING: bundled_keys.py not found - API keys will not be embedded!")
+
 # Note: SSL certificates are handled automatically by PyInstaller's certifi hook
 # (hook-certifi.py from pyinstaller-hooks-contrib)
 
@@ -126,6 +133,7 @@ if IS_MACOS:
     ])
 
 # Exclude unnecessary modules to reduce size
+# NOTE: Do NOT exclude 'unittest' - pyparsing.testing imports it (used by google-generativeai)
 excludes = [
     'matplotlib',
     'scipy',
@@ -135,7 +143,7 @@ excludes = [
     'IPython',
     'test',
     'tests',
-    'unittest',
+    # 'unittest',  # Required by pyparsing.testing
     'pytest',
 ]
 

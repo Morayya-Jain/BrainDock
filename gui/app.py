@@ -4669,15 +4669,29 @@ By clicking 'I Understand', you acknowledge this data processing."""
             logger.error(f"Failed to open file: {e}")
     
     def _show_camera_error(self):
-        """Show camera access error dialog."""
-        messagebox.showerror(
-            "Camera Error",
-            "Failed to access webcam.\n\n"
-            "Please check:\n"
-            "• Camera is connected\n"
-            "• Camera permissions are granted\n"
-            "• No other app is using the camera"
-        )
+        """Show camera access error dialog with platform-specific instructions."""
+        if sys.platform == "darwin":
+            # macOS-specific message with privacy settings instructions
+            message = (
+                "Failed to access webcam.\n\n"
+                "On macOS, you need to grant camera permission:\n\n"
+                "1. Open System Settings\n"
+                "2. Go to Privacy & Security → Camera\n"
+                "3. Enable BrainDock in the list\n"
+                "4. Restart BrainDock\n\n"
+                "If BrainDock is not in the list, try clicking\n"
+                "'Start Session' again to trigger the prompt."
+            )
+        else:
+            message = (
+                "Failed to access webcam.\n\n"
+                "Please check:\n"
+                "• Camera is connected\n"
+                "• Camera permissions are granted\n"
+                "• No other app is using the camera"
+            )
+        
+        messagebox.showerror("Camera Error", message)
         self._reset_button_state()
         self._update_status("idle", "Ready to Start")
     

@@ -91,6 +91,15 @@ class CameraCapture:
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, STANDARD_WIDTH)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, STANDARD_HEIGHT)
             
+            # Verify camera actually works by reading a test frame
+            # On macOS, isOpened() can return True even without camera permission
+            # The permission prompt only appears when we try to read a frame
+            ret, test_frame = self.cap.read()
+            if not ret or test_frame is None:
+                logger.error("Camera opened but cannot read frames - permission may be denied")
+                self.cap.release()
+                return False
+            
             self.is_opened = True
             props = self.get_properties()
             logger.info(f"Camera opened at {props.get('width')}x{props.get('height')}")
