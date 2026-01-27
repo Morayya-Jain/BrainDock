@@ -1,6 +1,7 @@
 # BrainDock Build Workflow
 #
 # Automatically builds macOS and Windows executables when a version tag is pushed.
+# Signs and notarizes macOS builds for Gatekeeper approval.
 # Uploads the built artifacts to GitHub Releases.
 #
 # Usage:
@@ -10,11 +11,16 @@
 #      - STRIPE_SECRET_KEY (optional, for payments)
 #      - STRIPE_PUBLISHABLE_KEY (optional, for payments)
 #      - STRIPE_PRICE_ID (optional, for payments)
+#      - APPLE_CERTIFICATE_BASE64 (required for signing)
+#      - APPLE_CERTIFICATE_PASSWORD (required for signing)
+#      - APPLE_ID (required for notarization)
+#      - APPLE_APP_SPECIFIC_PASSWORD (required for notarization)
+#      - APPLE_TEAM_ID (required for notarization)
 #   2. Push a tag: git tag v1.0.0 && git push origin v1.0.0
-#   3. The workflow will build both platforms and create a release
+#   3. The workflow will build, sign, notarize, and create a release
 #
 # The release will contain:
-#   - BrainDock-macOS.dmg (macOS installer - drag to Applications)
+#   - BrainDock-macOS.dmg (signed & notarized macOS installer)
 #   - BrainDock-Windows.zip (Windows .exe)
 
 name: Build and Release
@@ -34,7 +40,7 @@ env:
   PYTHON_VERSION: '3.11'
 
 jobs:
-  # Build macOS app
+  # Build macOS app (signed and notarized)
   build-macos:
     runs-on: macos-latest
     
@@ -52,6 +58,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
+      
+      - name: Install create-dmg
+        run: brew install create-dmg
       
       - name: Generate icons
         run: python build/create_icons.py
@@ -97,35 +106,141 @@ jobs:
         run: |
           pyinstaller build/braindock.spec --noconfirm
       
-      - name: Get version for DMG
-        id: version
+      - name: Install Apple Developer Certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          else
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          # Remove 'v' prefix if present for filename
-          VERSION_NUM="${VERSION#v}"
-          echo "VERSION_NUM=$VERSION_NUM" >> $GITHUB_OUTPUT
-      
-      - name: Create DMG installer
-        run: |
-          # Create staging folder with app and Applications symlink
-          mkdir -p dist/dmg-staging
-          cp -R dist/BrainDock.app dist/dmg-staging/
-          ln -s /Applications dist/dmg-staging/Applications
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           
-          # Create DMG
-          hdiutil create \
-            -volname "BrainDock" \
-            -srcfolder dist/dmg-staging \
-            -ov \
-            -format UDZO \
-            dist/BrainDock-macOS.dmg
+          # Decode certificate
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          
+          # Create and configure keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # Import certificate
+          security import $RUNNER_TEMP/certificate.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          
+          # Allow codesign to access the keychain
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # Verify certificate is installed
+          security find-identity -v -p codesigning $KEYCHAIN_PATH
           
           # Clean up
-          rm -rf dist/dmg-staging
+          rm $RUNNER_TEMP/certificate.p12
+      
+      - name: Sign app bundle
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          IDENTITY="Developer ID Application: Morayya Jain ($APPLE_TEAM_ID)"
+          ENTITLEMENTS="build/entitlements.plist"
+          
+          echo "Signing with identity: $IDENTITY"
+          
+          # Sign all nested components first
+          find dist/BrainDock.app -name "*.dylib" -o -name "*.so" -o -name "*.framework" | while read -r file; do
+            codesign --force --options runtime --timestamp \
+              --entitlements "$ENTITLEMENTS" \
+              --sign "$IDENTITY" \
+              "$file" 2>/dev/null || true
+          done
+          
+          # Sign Python executables
+          find dist/BrainDock.app -name "python*" -type f -perm +111 | while read -r file; do
+            codesign --force --options runtime --timestamp \
+              --entitlements "$ENTITLEMENTS" \
+              --sign "$IDENTITY" \
+              "$file" 2>/dev/null || true
+          done
+          
+          # Sign the main executable
+          codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$IDENTITY" \
+            "dist/BrainDock.app/Contents/MacOS/BrainDock"
+          
+          # Sign the entire app bundle
+          codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$IDENTITY" \
+            "dist/BrainDock.app"
+          
+          # Verify signature
+          codesign --verify --verbose=2 dist/BrainDock.app
+          echo "App signed successfully!"
+      
+      - name: Notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "Creating ZIP for notarization..."
+          ditto -c -k --keepParent dist/BrainDock.app dist/BrainDock-notarize.zip
+          
+          echo "Submitting to Apple notarization service..."
+          xcrun notarytool submit dist/BrainDock-notarize.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          
+          echo "Stapling notarization ticket..."
+          xcrun stapler staple dist/BrainDock.app
+          
+          echo "Notarization complete!"
+          rm dist/BrainDock-notarize.zip
+      
+      - name: Create signed DMG
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          IDENTITY="Developer ID Application: Morayya Jain ($APPLE_TEAM_ID)"
+          
+          # Generate DMG background if it doesn't exist
+          if [ ! -f "build/dmg_background.png" ]; then
+            python build/create_dmg_background.py
+          fi
+          
+          # Create DMG using create-dmg
+          create-dmg \
+            --volname "BrainDock" \
+            --volicon "build/icon.icns" \
+            --background "build/dmg_background.png" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 100 \
+            --icon "BrainDock.app" 180 190 \
+            --hide-extension "BrainDock.app" \
+            --app-drop-link 480 190 \
+            --no-internet-enable \
+            "dist/BrainDock-macOS.dmg" \
+            "dist/BrainDock.app"
+          
+          # Sign the DMG
+          codesign --force --timestamp \
+            --sign "$IDENTITY" \
+            "dist/BrainDock-macOS.dmg"
+          
+          # Notarize the DMG
+          xcrun notarytool submit dist/BrainDock-macOS.dmg \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --password "${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          
+          # Staple the DMG
+          xcrun stapler staple dist/BrainDock-macOS.dmg
+          
+          echo "DMG created, signed, and notarized!"
       
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -258,13 +373,13 @@ jobs:
             | macOS | [BrainDock-macOS.dmg](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/BrainDock-macOS.dmg) |
             | Windows | [BrainDock-Windows.zip](https://github.com/${{ github.repository }}/releases/download/${{ steps.get_version.outputs.VERSION }}/BrainDock-Windows.zip) |
             
-            ### First-Time Launch Instructions
+            ### Installation Instructions
             
-            **macOS:**
+            **macOS:** (Signed & Notarized - No Gatekeeper warnings!)
             1. Download and double-click the DMG file
             2. Drag BrainDock to the Applications folder
             3. Eject the DMG
-            4. Open BrainDock from Applications (right-click → Open the first time)
+            4. Open BrainDock from Applications
             
             **Windows:**
             1. Extract the ZIP file

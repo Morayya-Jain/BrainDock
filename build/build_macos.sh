@@ -2,14 +2,21 @@
 #
 # BrainDock macOS Build Script
 #
-# This script builds the macOS .app bundle using PyInstaller.
-# It sets up a clean virtual environment, installs dependencies,
-# and creates the final application bundle.
+# This script builds the macOS .app bundle using PyInstaller,
+# signs it with a Developer ID certificate, and notarizes it
+# with Apple for Gatekeeper approval.
 #
 # Usage:
 #   GEMINI_API_KEY=your-key ./build/build_macos.sh
 #
+# For signed and notarized builds (recommended for distribution):
+#   GEMINI_API_KEY=your-key \
+#   APPLE_ID=your-apple-id@email.com \
+#   APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx \
+#   ./build/build_macos.sh
+#
 # The built app will be in: dist/BrainDock.app
+# The DMG installer will be in: dist/BrainDock-VERSION-macOS.dmg
 #
 
 set -e  # Exit on error
@@ -178,6 +185,128 @@ if [[ -d "$PROJECT_ROOT/dist/BrainDock.app" ]]; then
     echo -e "App size: ${YELLOW}$APP_SIZE${NC}"
     echo ""
     
+    # Code Signing Configuration
+    CODESIGN_IDENTITY="Developer ID Application: Morayya Jain (B62872437T)"
+    TEAM_ID="B62872437T"
+    ENTITLEMENTS="$SCRIPT_DIR/entitlements.plist"
+    
+    # Check if we should sign and notarize
+    SHOULD_SIGN=false
+    SHOULD_NOTARIZE=false
+    
+    # Check if signing identity exists
+    if security find-identity -v -p codesigning | grep -q "$CODESIGN_IDENTITY"; then
+        SHOULD_SIGN=true
+        echo -e "${GREEN}Developer ID certificate found. Will sign the app.${NC}"
+    else
+        echo -e "${YELLOW}Warning: Developer ID certificate not found.${NC}"
+        echo -e "${YELLOW}The app will not be signed and users will see Gatekeeper warnings.${NC}"
+        echo ""
+    fi
+    
+    # Check if notarization credentials are provided
+    if [[ -n "$APPLE_ID" && -n "$APPLE_APP_SPECIFIC_PASSWORD" ]]; then
+        SHOULD_NOTARIZE=true
+        echo -e "${GREEN}Notarization credentials found. Will notarize the app.${NC}"
+    else
+        echo -e "${YELLOW}Note: Notarization credentials not provided.${NC}"
+        echo -e "${YELLOW}Set APPLE_ID and APPLE_APP_SPECIFIC_PASSWORD to enable notarization.${NC}"
+        echo ""
+    fi
+    
+    # Sign the app bundle
+    if [[ "$SHOULD_SIGN" == true ]]; then
+        echo ""
+        echo -e "${YELLOW}Signing app bundle with Developer ID...${NC}"
+        
+        # Sign all nested components first (deep signing)
+        # Sign frameworks and dylibs
+        find "$PROJECT_ROOT/dist/BrainDock.app" -name "*.dylib" -o -name "*.so" -o -name "*.framework" 2>/dev/null | while read -r file; do
+            codesign --force --options runtime --timestamp \
+                --entitlements "$ENTITLEMENTS" \
+                --sign "$CODESIGN_IDENTITY" \
+                "$file" 2>/dev/null || true
+        done
+        
+        # Sign Python executables
+        find "$PROJECT_ROOT/dist/BrainDock.app" -name "python*" -type f -perm +111 2>/dev/null | while read -r file; do
+            codesign --force --options runtime --timestamp \
+                --entitlements "$ENTITLEMENTS" \
+                --sign "$CODESIGN_IDENTITY" \
+                "$file" 2>/dev/null || true
+        done
+        
+        # Sign the main executable
+        codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$CODESIGN_IDENTITY" \
+            "$PROJECT_ROOT/dist/BrainDock.app/Contents/MacOS/BrainDock"
+        
+        # Sign the entire app bundle
+        codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$CODESIGN_IDENTITY" \
+            "$PROJECT_ROOT/dist/BrainDock.app"
+        
+        # Verify the signature
+        echo -e "${YELLOW}Verifying signature...${NC}"
+        codesign --verify --verbose=2 "$PROJECT_ROOT/dist/BrainDock.app"
+        
+        if [[ $? -eq 0 ]]; then
+            echo -e "${GREEN}App signed successfully!${NC}"
+        else
+            echo -e "${RED}Warning: Signature verification failed.${NC}"
+        fi
+        echo ""
+    fi
+    
+    # Notarize the app
+    if [[ "$SHOULD_SIGN" == true && "$SHOULD_NOTARIZE" == true ]]; then
+        echo -e "${YELLOW}Notarizing app with Apple...${NC}"
+        echo "This may take several minutes..."
+        echo ""
+        
+        # Create a ZIP for notarization
+        NOTARIZE_ZIP="$PROJECT_ROOT/dist/BrainDock-notarize.zip"
+        ditto -c -k --keepParent "$PROJECT_ROOT/dist/BrainDock.app" "$NOTARIZE_ZIP"
+        
+        # Submit for notarization
+        echo -e "${YELLOW}Submitting to Apple notarization service...${NC}"
+        
+        NOTARIZE_OUTPUT=$(xcrun notarytool submit "$NOTARIZE_ZIP" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$TEAM_ID" \
+            --wait 2>&1)
+        
+        echo "$NOTARIZE_OUTPUT"
+        
+        # Check if notarization succeeded
+        if echo "$NOTARIZE_OUTPUT" | grep -q "status: Accepted"; then
+            echo ""
+            echo -e "${GREEN}Notarization successful!${NC}"
+            
+            # Staple the notarization ticket to the app
+            echo -e "${YELLOW}Stapling notarization ticket...${NC}"
+            xcrun stapler staple "$PROJECT_ROOT/dist/BrainDock.app"
+            
+            if [[ $? -eq 0 ]]; then
+                echo -e "${GREEN}Notarization ticket stapled successfully!${NC}"
+            else
+                echo -e "${RED}Warning: Failed to staple notarization ticket.${NC}"
+            fi
+        else
+            echo ""
+            echo -e "${RED}Warning: Notarization may have failed. Check the output above.${NC}"
+            echo -e "${YELLOW}You can check notarization history with:${NC}"
+            echo "  xcrun notarytool history --apple-id $APPLE_ID --team-id $TEAM_ID"
+        fi
+        
+        # Clean up the zip
+        rm -f "$NOTARIZE_ZIP"
+        echo ""
+    fi
+    
     # Create DMG
     echo -e "${YELLOW}Creating DMG installer...${NC}"
     
@@ -236,6 +365,49 @@ if [[ -d "$PROJECT_ROOT/dist/BrainDock.app" ]]; then
     
     # Check if DMG was created
     if [[ -f "$DMG_PATH" ]]; then
+        # Sign the DMG
+        if [[ "$SHOULD_SIGN" == true ]]; then
+            echo ""
+            echo -e "${YELLOW}Signing DMG...${NC}"
+            codesign --force --timestamp \
+                --sign "$CODESIGN_IDENTITY" \
+                "$DMG_PATH"
+            
+            # Verify DMG signature
+            codesign --verify --verbose=2 "$DMG_PATH"
+            echo -e "${GREEN}DMG signed successfully!${NC}"
+        fi
+        
+        # Notarize the DMG
+        if [[ "$SHOULD_SIGN" == true && "$SHOULD_NOTARIZE" == true ]]; then
+            echo ""
+            echo -e "${YELLOW}Notarizing DMG with Apple...${NC}"
+            echo "This may take several minutes..."
+            
+            NOTARIZE_DMG_OUTPUT=$(xcrun notarytool submit "$DMG_PATH" \
+                --apple-id "$APPLE_ID" \
+                --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+                --team-id "$TEAM_ID" \
+                --wait 2>&1)
+            
+            echo "$NOTARIZE_DMG_OUTPUT"
+            
+            if echo "$NOTARIZE_DMG_OUTPUT" | grep -q "status: Accepted"; then
+                echo ""
+                echo -e "${GREEN}DMG notarization successful!${NC}"
+                
+                # Staple the notarization ticket to the DMG
+                echo -e "${YELLOW}Stapling notarization ticket to DMG...${NC}"
+                xcrun stapler staple "$DMG_PATH"
+                
+                if [[ $? -eq 0 ]]; then
+                    echo -e "${GREEN}DMG notarization ticket stapled!${NC}"
+                fi
+            else
+                echo -e "${YELLOW}Warning: DMG notarization may have failed.${NC}"
+            fi
+        fi
+        
         DMG_SIZE=$(du -sh "$DMG_PATH" | cut -f1)
         echo ""
         echo -e "${GREEN}=================================================${NC}"
@@ -244,20 +416,34 @@ if [[ -d "$PROJECT_ROOT/dist/BrainDock.app" ]]; then
         echo ""
         echo -e "DMG installer: ${BLUE}$DMG_PATH${NC}"
         echo -e "DMG size: ${YELLOW}$DMG_SIZE${NC}"
+        
+        # Show signing/notarization status
+        if [[ "$SHOULD_SIGN" == true && "$SHOULD_NOTARIZE" == true ]]; then
+            echo -e "Signed: ${GREEN}Yes${NC}"
+            echo -e "Notarized: ${GREEN}Yes${NC}"
+            echo ""
+            echo -e "${GREEN}The app is ready for distribution!${NC}"
+            echo -e "${GREEN}Users will NOT see Gatekeeper warnings.${NC}"
+        elif [[ "$SHOULD_SIGN" == true ]]; then
+            echo -e "Signed: ${GREEN}Yes${NC}"
+            echo -e "Notarized: ${YELLOW}No${NC}"
+            echo ""
+            echo -e "${YELLOW}Note: App is signed but not notarized.${NC}"
+            echo -e "${YELLOW}Users may still see 'unidentified developer' warnings.${NC}"
+        else
+            echo -e "Signed: ${RED}No${NC}"
+            echo -e "Notarized: ${RED}No${NC}"
+            echo ""
+            echo -e "${YELLOW}Warning: App is not signed or notarized.${NC}"
+            echo -e "${YELLOW}Users will see Gatekeeper warnings.${NC}"
+        fi
+        
         echo ""
         echo -e "${YELLOW}To test:${NC}"
         echo "  open \"$DMG_PATH\""
         echo ""
         echo -e "${YELLOW}To distribute:${NC}"
-        echo "  Upload $DMG_NAME to GitHub Releases"
-        echo ""
-        echo -e "${YELLOW}User experience:${NC}"
-        echo "  1. User downloads $DMG_NAME"
-        echo "  2. Double-clicks to mount"
-        echo "  3. Sees BrainDock icon with arrow pointing to Applications"
-        echo "  4. Drags BrainDock to Applications folder"
-        echo "  5. Ejects the DMG"
-        echo "  6. Launches from Applications (right-click > Open first time)"
+        echo "  Upload $DMG_NAME to GitHub Releases or your website"
     else
         echo -e "${RED}Error: Failed to create DMG${NC}"
         exit 1
