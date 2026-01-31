@@ -1,8 +1,12 @@
 #
 # BrainDock Windows Build Script (PowerShell)
 #
-# This script builds the Windows executable using PyInstaller.
-# It sets up dependencies and creates the final application.
+# This script builds the Windows installer using PyInstaller and Inno Setup.
+# It creates a professional installer with Start Menu/Desktop shortcuts.
+#
+# Prerequisites:
+#   - Python 3.9+
+#   - Inno Setup 6.x (https://jrsoftware.org/isdl.php)
 #
 # Usage:
 #   $env:GEMINI_API_KEY="your-key"
@@ -11,10 +15,12 @@
 #   $env:STRIPE_PRICE_ID="your-id"
 #   .\build\build_windows.ps1
 #
-# Or in one line:
-#   $env:GEMINI_API_KEY="key"; $env:STRIPE_SECRET_KEY="key"; $env:STRIPE_PUBLISHABLE_KEY="key"; $env:STRIPE_PRICE_ID="id"; .\build\build_windows.ps1
+# For code-signed builds (optional):
+#   $env:WIN_CODESIGN_CERT="path\to\certificate.pfx"
+#   $env:WIN_CODESIGN_PASS="certificate-password"
+#   .\build\build_windows.ps1
 #
-# The built app will be in: dist\BrainDock\
+# Output: dist\BrainDock-{VERSION}-Setup.exe
 #
 
 $ErrorActionPreference = "Stop"
@@ -84,6 +90,81 @@ if (-not (Test-Path "$ScriptDir\icon.ico")) {
     Write-Host "Icons already exist." -ForegroundColor Green
 }
 
+# Check for Inno Setup installation
+Write-Host ""
+Write-Host "Checking for Inno Setup..." -ForegroundColor Yellow
+
+$InnoSetupPaths = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+)
+
+$InnoSetup = $null
+foreach ($path in $InnoSetupPaths) {
+    if (Test-Path $path) {
+        $InnoSetup = $path
+        break
+    }
+}
+
+if (-not $InnoSetup) {
+    Write-Host "Error: Inno Setup 6 not found." -ForegroundColor Red
+    Write-Host ""
+    Write-Host "Please install Inno Setup 6 from: https://jrsoftware.org/isdl.php" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "After installation, run this script again."
+    exit 1
+}
+
+Write-Host "Inno Setup found: $InnoSetup" -ForegroundColor Green
+
+# Generate license.txt from Terms and Conditions for installer
+Write-Host ""
+Write-Host "Generating license file for installer..." -ForegroundColor Yellow
+
+$TermsFile = "$ProjectRoot\legal\TERMS_AND_CONDITIONS.md"
+$LicenseFile = "$ScriptDir\license.txt"
+
+if (Test-Path $TermsFile) {
+    # Read the markdown file and convert to plain text
+    $content = Get-Content $TermsFile -Raw
+    
+    # Remove YAML front matter
+    $content = $content -replace "(?s)^---.*?---\s*", ""
+    
+    # Remove markdown headers (keep text) - use (?m) for multiline mode
+    $content = $content -replace "(?m)^#{1,6}\s*", "" 
+    
+    # Remove markdown bold/italic
+    $content = $content -replace "\*\*([^*]+)\*\*", '$1'
+    $content = $content -replace "\*([^*]+)\*", '$1'
+    
+    # Remove markdown links, keep text
+    $content = $content -replace "\[([^\]]+)\]\([^)]+\)", '$1'
+    
+    # Clean up multiple blank lines
+    $content = $content -replace "(\r?\n){3,}", "`r`n`r`n"
+    
+    # Write to license.txt (UTF-8 without BOM)
+    [System.IO.File]::WriteAllText($LicenseFile, $content.Trim(), [System.Text.UTF8Encoding]::new($false))
+    
+    Write-Host "License file generated: $LicenseFile" -ForegroundColor Green
+} else {
+    Write-Host "Warning: Terms file not found at $TermsFile" -ForegroundColor Yellow
+    Write-Host "Creating minimal license file..." -ForegroundColor Yellow
+    
+    $minimalLicense = @"
+BrainDock - Terms of Use
+
+By installing and using BrainDock, you agree to the terms and conditions
+available at https://thebraindock.com/legal/terms/
+
+Copyright (c) 2026 BrainDock. All rights reserved.
+"@
+    [System.IO.File]::WriteAllText($LicenseFile, $minimalLicense, [System.Text.UTF8Encoding]::new($false))
+}
+
 # Clean previous builds
 Write-Host ""
 Write-Host "Cleaning previous builds..." -ForegroundColor Yellow
@@ -93,6 +174,8 @@ if (Test-Path "$ProjectRoot\dist\BrainDock") {
 if (Test-Path "$ProjectRoot\build\BrainDock") {
     Remove-Item -Recurse -Force "$ProjectRoot\build\BrainDock"
 }
+# Clean previous installer files
+Get-ChildItem -Path "$ProjectRoot\dist" -Filter "BrainDock-*-Setup.exe" -ErrorAction SilentlyContinue | Remove-Item -Force
 # Clean previously generated bundled_keys.py (will be regenerated with fresh keys)
 if (Test-Path "$ProjectRoot\bundled_keys.py") {
     Remove-Item -Force "$ProjectRoot\bundled_keys.py"
@@ -141,42 +224,159 @@ pyinstaller "$ScriptDir\braindock.spec" `
 if (Test-Path "$ProjectRoot\dist\BrainDock") {
     Write-Host ""
     Write-Host "=================================================" -ForegroundColor Green
-    Write-Host "        Build Successful!" -ForegroundColor Green
+    Write-Host "        PyInstaller Build Successful!" -ForegroundColor Green
     Write-Host "=================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "App folder: $ProjectRoot\dist\BrainDock" -ForegroundColor Blue
     Write-Host ""
     
-    # Create ZIP archive
-    Write-Host "Creating ZIP archive..." -ForegroundColor Yellow
+    # Code signing configuration
+    $ShouldSign = $false
+    $SignTool = $null
     
-    $Version = "1.0.0"
-    $ZipName = "BrainDock-$Version-Windows.zip"
-    $ZipPath = "$ProjectRoot\dist\$ZipName"
-    
-    # Remove existing ZIP if present
-    if (Test-Path $ZipPath) {
-        Remove-Item -Force $ZipPath
+    if ($env:WIN_CODESIGN_CERT -and (Test-Path $env:WIN_CODESIGN_CERT)) {
+        Write-Host "Code signing certificate found." -ForegroundColor Green
+        
+        # Find signtool.exe
+        $SignToolPaths = @(
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\signtool.exe",
+            "C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe"
+        )
+        
+        foreach ($path in $SignToolPaths) {
+            if (Test-Path $path) {
+                $SignTool = $path
+                break
+            }
+        }
+        
+        # Also try to find via where command
+        if (-not $SignTool) {
+            $SignTool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+        }
+        
+        if ($SignTool) {
+            $ShouldSign = $true
+            Write-Host "SignTool found: $SignTool" -ForegroundColor Green
+        } else {
+            Write-Host "Warning: signtool.exe not found. Install Windows SDK to enable signing." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Note: Code signing not configured. Set WIN_CODESIGN_CERT to enable." -ForegroundColor Yellow
     }
     
-    # Create ZIP
-    Compress-Archive -Path "$ProjectRoot\dist\BrainDock" -DestinationPath $ZipPath
-    
-    if (Test-Path $ZipPath) {
-        $ZipSize = (Get-Item $ZipPath).Length / 1MB
+    # Sign the main executable before packaging
+    if ($ShouldSign) {
         Write-Host ""
-        Write-Host "ZIP archive: $ZipPath" -ForegroundColor Blue
-        Write-Host ("ZIP size: {0:N1} MB" -f $ZipSize) -ForegroundColor Yellow
+        Write-Host "Signing BrainDock.exe..." -ForegroundColor Yellow
+        
+        $ExePath = "$ProjectRoot\dist\BrainDock\BrainDock.exe"
+        $TimestampServer = if ($env:WIN_CODESIGN_TIMESTAMP) { $env:WIN_CODESIGN_TIMESTAMP } else { "http://timestamp.digicert.com" }
+        
+        $signArgs = @(
+            "sign",
+            "/f", $env:WIN_CODESIGN_CERT,
+            "/p", $env:WIN_CODESIGN_PASS,
+            "/tr", $TimestampServer,
+            "/td", "sha256",
+            "/fd", "sha256",
+            $ExePath
+        )
+        
+        & $SignTool @signArgs
+        
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "BrainDock.exe signed successfully!" -ForegroundColor Green
+        } else {
+            Write-Host "Warning: Failed to sign BrainDock.exe" -ForegroundColor Yellow
+        }
+    }
+    
+    # Create installer with Inno Setup
+    Write-Host ""
+    Write-Host "Creating Windows installer with Inno Setup..." -ForegroundColor Yellow
+    Write-Host "This may take a minute..."
+    Write-Host ""
+    
+    # Run Inno Setup compiler
+    & $InnoSetup "$ScriptDir\installer.iss"
+    
+    # Read version from installer.iss to ensure consistency (single source of truth)
+    $IssContent = Get-Content "$ScriptDir\installer.iss" -Raw
+    if ($IssContent -match '#define MyAppVersion "([^"]+)"') {
+        $Version = $Matches[1]
+    } else {
+        $Version = "1.0.0"  # Fallback
+    }
+    $InstallerName = "BrainDock-$Version-Setup.exe"
+    $InstallerPath = "$ProjectRoot\dist\$InstallerName"
+    
+    if (Test-Path $InstallerPath) {
+        Write-Host ""
+        Write-Host "Installer created successfully!" -ForegroundColor Green
+        
+        # Sign the installer
+        if ($ShouldSign) {
+            Write-Host ""
+            Write-Host "Signing installer..." -ForegroundColor Yellow
+            
+            $signArgs = @(
+                "sign",
+                "/f", $env:WIN_CODESIGN_CERT,
+                "/p", $env:WIN_CODESIGN_PASS,
+                "/tr", $TimestampServer,
+                "/td", "sha256",
+                "/fd", "sha256",
+                $InstallerPath
+            )
+            
+            & $SignTool @signArgs
+            
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Installer signed successfully!" -ForegroundColor Green
+            } else {
+                Write-Host "Warning: Failed to sign installer" -ForegroundColor Yellow
+            }
+        }
+        
+        $InstallerSize = (Get-Item $InstallerPath).Length / 1MB
+        
+        Write-Host ""
+        Write-Host "=================================================" -ForegroundColor Green
+        Write-Host "        Build Complete!" -ForegroundColor Green
+        Write-Host "=================================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Installer: $InstallerPath" -ForegroundColor Blue
+        Write-Host ("Size: {0:N1} MB" -f $InstallerSize) -ForegroundColor Yellow
+        
+        if ($ShouldSign) {
+            Write-Host "Code Signed: Yes" -ForegroundColor Green
+        } else {
+            Write-Host "Code Signed: No" -ForegroundColor Yellow
+        }
+        
         Write-Host ""
         Write-Host "To test:" -ForegroundColor Yellow
-        Write-Host "  Expand-Archive -Path `"$ZipPath`" -DestinationPath `"$ProjectRoot\dist\test`""
-        Write-Host "  & `"$ProjectRoot\dist\test\BrainDock\BrainDock.exe`""
+        Write-Host "  & `"$InstallerPath`""
         Write-Host ""
         Write-Host "To distribute:" -ForegroundColor Yellow
-        Write-Host "  Upload $ZipName to GitHub Releases"
+        Write-Host "  Upload $InstallerName to GitHub Releases"
+        Write-Host ""
+        Write-Host "The installer will:" -ForegroundColor Cyan
+        Write-Host "  - Show license agreement"
+        Write-Host "  - Install to Program Files"
+        Write-Host "  - Create Start Menu shortcut"
+        Write-Host "  - Create Desktop shortcut"
+        Write-Host "  - Register in Add/Remove Programs"
+        
     } else {
-        Write-Host "Warning: Failed to create ZIP archive" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Error: Inno Setup failed to create installer" -ForegroundColor Red
+        Write-Host "Check the output above for errors."
+        exit 1
     }
+    
 } else {
     Write-Host ""
     Write-Host "=================================================" -ForegroundColor Red
@@ -186,6 +386,22 @@ if (Test-Path "$ProjectRoot\dist\BrainDock") {
     Write-Host "Check the output above for errors."
     exit 1
 }
+
+# Clean up temporary files
+Write-Host ""
+Write-Host "Cleaning up..." -ForegroundColor Yellow
+
+# Remove bundled_keys.py (contains secrets)
+if (Test-Path "$ProjectRoot\bundled_keys.py") {
+    Remove-Item -Force "$ProjectRoot\bundled_keys.py"
+}
+
+# Remove generated license file
+if (Test-Path "$ScriptDir\license.txt") {
+    Remove-Item -Force "$ScriptDir\license.txt"
+}
+
+Write-Host "Cleanup complete." -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Done!" -ForegroundColor Green

@@ -5,24 +5,36 @@
 
 Thank you for downloading BrainDock!
 
-FIRST-TIME LAUNCH
------------------
-Since this app is from an independent developer, Windows SmartScreen
-may show a warning the first time you run it.
 
-To open BrainDock:
+INSTALLATION
+------------
+1. Run BrainDock-Setup.exe
 
-1. Extract the ZIP file to a folder of your choice
-   (Right-click > Extract All)
-
-2. Open the extracted folder and double-click BrainDock.exe
-
-3. If Windows SmartScreen appears with "Windows protected your PC":
+2. If Windows SmartScreen appears with "Windows protected your PC":
    a. Click "More info"
    b. Click "Run anyway"
+   
+   Note: This warning appears because the app is from an independent
+   developer. The app is safe to install.
 
-4. The app will now open, and you shouldn't see this warning again
-   for this installation
+3. Follow the installation wizard:
+   - Accept the license agreement
+   - Choose installation location (default: C:\Program Files\BrainDock)
+   - Click Install
+
+4. The installer will create:
+   - Start Menu shortcut (BrainDock folder)
+   - Desktop shortcut
+   - Uninstaller entry in Windows Settings
+
+
+LAUNCHING BRAINDOCK
+-------------------
+After installation, you can launch BrainDock by:
+
+- Clicking the Desktop shortcut
+- Searching "BrainDock" in the Start Menu
+- Opening from: C:\Program Files\BrainDock\BrainDock.exe
 
 
 PERMISSIONS
@@ -31,12 +43,12 @@ BrainDock needs access to your camera to monitor your focus.
 When prompted, allow camera access.
 
 You can manage camera permissions in:
-Settings > Privacy > Camera
+Settings > Privacy & Security > Camera
 
 
 GETTING STARTED
 ---------------
-1. Launch BrainDock.exe
+1. Launch BrainDock
 2. Complete payment via Stripe (if first launch)
 3. Click "Start Session" to begin focus tracking
 4. The app will monitor your presence and detect distractions
@@ -58,20 +70,32 @@ This feature uses Windows UI Automation to read the browser's address bar.
 No special permissions are required - it works automatically.
 
 
+UNINSTALLING
+------------
+To uninstall BrainDock:
+
+1. Open Windows Settings
+2. Go to Apps > Installed apps
+3. Find "BrainDock" in the list
+4. Click the three dots menu > Uninstall
+
+Or use the uninstaller shortcut in the Start Menu:
+Start > BrainDock > Uninstall BrainDock
+
+
 TROUBLESHOOTING
 ---------------
 If the app doesn't start:
 
-1. Make sure you extracted the entire ZIP file, not just the .exe
-   (All files in the folder are needed)
+1. Try running as Administrator:
+   Right-click BrainDock shortcut > Run as administrator
 
-2. Try running as Administrator:
-   Right-click BrainDock.exe > Run as administrator
-
-3. Check if your antivirus is blocking the app
+2. Check if your antivirus is blocking the app
    You may need to add an exception for BrainDock
 
-4. Make sure your webcam is connected and not in use by another app
+3. Make sure your webcam is connected and not in use by another app
+
+4. Reinstall the application
 
 If alert sounds don't play:
 - Check your system volume is not muted
@@ -82,10 +106,28 @@ If Chrome/Edge URL detection doesn't work:
 - The address bar must be visible (not in full-screen mode)
 
 
+DATA LOCATIONS
+--------------
+BrainDock stores user data in:
+  %APPDATA%\BrainDock\
+
+This includes:
+  - Session data
+  - Blocklist settings
+  - License information
+
+PDF reports are saved to:
+  %USERPROFILE%\Downloads\
+
+
 TESTING CHECKLIST (For Developers)
 ----------------------------------
 Use this checklist to verify Windows 10/11 compatibility:
 
+[ ] Installation: Installer runs and completes successfully
+[ ] Start Menu: Shortcut appears and works
+[ ] Desktop: Shortcut appears and works  
+[ ] Uninstall: App removes cleanly via Settings
 [ ] Sound playback: Alert sound plays when distraction detected
 [ ] Chrome URL detection: Blocklist entries like "youtube.com" trigger correctly
 [ ] Edge URL detection: Same functionality works in Microsoft Edge
@@ -99,7 +141,8 @@ Use this checklist to verify Windows 10/11 compatibility:
 SUPPORT
 -------
 If you have any issues, please contact:
-[Your support email/website here]
+Email: morayyajain@gmail.com
+Website: https://thebraindock.com
 
 
 ===============================================
