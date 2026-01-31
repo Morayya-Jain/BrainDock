@@ -31,6 +31,8 @@ def get_macos_camera_permission_status() -> int:
         - AUTHORIZED (3): User granted permission
         
     On non-macOS platforms, always returns AUTHORIZED.
+    Note: Windows 10+ has camera privacy settings but checking them requires
+    additional libraries. Camera errors on Windows will show a helpful message.
     """
     if sys.platform != "darwin":
         return CAMERA_PERMISSION_AUTHORIZED
@@ -200,9 +202,10 @@ class CameraCapture:
             width: Frame width in pixels (default from config)
             height: Frame height in pixels (default from config)
         """
-        self.camera_index = camera_index or config.CAMERA_INDEX
-        self.width = width or config.FRAME_WIDTH
-        self.height = height or config.FRAME_HEIGHT
+        # Use explicit None check - 0 is a valid camera index!
+        self.camera_index = camera_index if camera_index is not None else config.CAMERA_INDEX
+        self.width = width if width is not None else config.FRAME_WIDTH
+        self.height = height if height is not None else config.FRAME_HEIGHT
         self.cap: Optional[cv2.VideoCapture] = None
         self.is_opened = False
         self.permission_error: Optional[str] = None  # Stores permission error message if any
@@ -247,6 +250,22 @@ class CameraCapture:
             
             if not self.cap.isOpened():
                 logger.error(f"Failed to open camera at index {self.camera_index}")
+                # Release the capture object to prevent resource leak
+                self.cap.release()
+                self.cap = None
+                
+                # Provide Windows-specific guidance for camera access issues
+                if sys.platform == "win32":
+                    self.permission_error = (
+                        "Camera access failed.\n\n"
+                        "This may be due to Windows Privacy settings:\n"
+                        "1. Open Settings\n"
+                        "2. Go to Privacy & Security → Camera\n"
+                        "3. Ensure 'Camera access' is On\n"
+                        "4. Ensure 'Let apps access your camera' is On\n"
+                        "5. Restart BrainDock"
+                    )
+                
                 return False
             
             # Standard fallback resolution (4:3)

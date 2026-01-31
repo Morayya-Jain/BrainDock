@@ -496,7 +496,8 @@ from gui.ui_components import (
     MIN_HEIGHT,
     FONT_BOUNDS,
     get_screen_scale_factor,
-    normalize_tk_scaling
+    normalize_tk_scaling,
+    setup_natural_scroll
 )
 
 # Base dimensions for scaling (larger default window) - keep for backward compat
@@ -2553,102 +2554,8 @@ class BrainDockGUI:
         )
         scrollable_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(20, 0))
         
-        # Tk 9 fix: Bind <TouchpadScroll> event for macOS trackpad scrolling
-        # Industry-standard scrolling: pure direct tracking + momentum on release
-        import time as time_module
-        
-        # Momentum constants
-        MIN_VELOCITY = 0.0003
-        FRICTION = 0.95
-        
-        scroll_state = {
-            "velocity": 0.0,
-            "last_time": 0,
-            "last_scroll_amount": 0,
-            "animating": False
-        }
-        
-        def _apply_inertia():
-            """Momentum animation after finger lifts."""
-            if abs(scroll_state["velocity"]) < MIN_VELOCITY:
-                scroll_state["velocity"] = 0.0
-                scroll_state["animating"] = False
-                return
-            
-            # Stop if new input
-            if time_module.time() - scroll_state["last_time"] < 0.04:
-                scroll_state["animating"] = False
-                return
-            
-            try:
-                canvas = scrollable_frame._parent_canvas
-                current = canvas.yview()
-                visible = current[1] - current[0]
-                
-                # Bounds check
-                if (scroll_state["velocity"] > 0 and current[1] >= 1.0) or \
-                   (scroll_state["velocity"] < 0 and current[0] <= 0.0):
-                    scroll_state["velocity"] = 0.0
-                    scroll_state["animating"] = False
-                    return
-                
-                new_pos = current[0] + scroll_state["velocity"]
-                new_pos = max(0.0, min(1.0 - visible, new_pos))
-                canvas.yview_moveto(new_pos)
-                
-                scroll_state["velocity"] *= FRICTION
-                settings_window.after(16, _apply_inertia)
-            except:
-                scroll_state["animating"] = False
-        
-        def _start_inertia():
-            """Start momentum if finger lifted."""
-            if time_module.time() - scroll_state["last_time"] > 0.04:
-                if abs(scroll_state["velocity"]) >= MIN_VELOCITY and not scroll_state["animating"]:
-                    scroll_state["animating"] = True
-                    _apply_inertia()
-        
-        def _on_touchpad_scroll(event):
-            """Pure direct tracking - content follows finger exactly."""
-            try:
-                delta_y = event.delta & 0xFFFF
-                if delta_y > 32767:
-                    delta_y -= 65536
-                
-                if abs(delta_y) < 1:
-                    return
-                
-                current_time = time_module.time()
-                time_delta = current_time - scroll_state["last_time"]
-                
-                scroll_state["animating"] = False
-                
-                canvas = scrollable_frame._parent_canvas
-                current = canvas.yview()
-                visible = current[1] - current[0]
-                
-                # Pure 1:1 tracking - no smoothing, no lag
-                scroll_amount = -delta_y * 0.0004
-                
-                new_pos = current[0] + scroll_amount
-                new_pos = max(0.0, min(1.0 - visible, new_pos))
-                canvas.yview_moveto(new_pos)
-                
-                # Velocity = recent scroll amounts (for momentum after release)
-                # Use simple average of last two for smoothness
-                if time_delta > 0 and time_delta < 0.15:
-                    scroll_state["velocity"] = (scroll_state["last_scroll_amount"] + scroll_amount) / 2
-                else:
-                    scroll_state["velocity"] = scroll_amount
-                
-                scroll_state["last_scroll_amount"] = scroll_amount
-                scroll_state["last_time"] = current_time
-                
-                settings_window.after(60, _start_inertia)
-            except:
-                pass
-        
-        settings_window.bind_all("<TouchpadScroll>", _on_touchpad_scroll)
+        # Set up natural scrolling (cross-platform, physics-based momentum)
+        natural_scroller = setup_natural_scroll(scrollable_frame, settings_window)
         
         # --- Content inside scrollable frame ---
         content_padding = ctk.CTkFrame(scrollable_frame, fg_color=COLORS["bg_primary"])
@@ -4028,102 +3935,8 @@ class BrainDockGUI:
         content_frame = ctk.CTkFrame(scrollable_frame, fg_color=COLORS["bg_primary"])
         content_frame.pack(fill=tk.BOTH, expand=True, padx=10)
         
-        # Tk 9 fix: Bind <TouchpadScroll> event for macOS trackpad scrolling
-        # Industry-standard scrolling: pure direct tracking + momentum on release
-        import time as time_module
-        
-        # Momentum constants
-        MIN_VELOCITY = 0.0003
-        FRICTION = 0.95
-        
-        scroll_state = {
-            "velocity": 0.0,
-            "last_time": 0,
-            "last_scroll_amount": 0,
-            "animating": False
-        }
-        
-        def _apply_inertia():
-            """Momentum animation after finger lifts."""
-            if abs(scroll_state["velocity"]) < MIN_VELOCITY:
-                scroll_state["velocity"] = 0.0
-                scroll_state["animating"] = False
-                return
-            
-            # Stop if new input
-            if time_module.time() - scroll_state["last_time"] < 0.04:
-                scroll_state["animating"] = False
-                return
-            
-            try:
-                canvas = scrollable_frame._parent_canvas
-                current = canvas.yview()
-                visible = current[1] - current[0]
-                
-                # Bounds check
-                if (scroll_state["velocity"] > 0 and current[1] >= 1.0) or \
-                   (scroll_state["velocity"] < 0 and current[0] <= 0.0):
-                    scroll_state["velocity"] = 0.0
-                    scroll_state["animating"] = False
-                    return
-                
-                new_pos = current[0] + scroll_state["velocity"]
-                new_pos = max(0.0, min(1.0 - visible, new_pos))
-                canvas.yview_moveto(new_pos)
-                
-                scroll_state["velocity"] *= FRICTION
-                tutorial_window.after(16, _apply_inertia)
-            except:
-                scroll_state["animating"] = False
-        
-        def _start_inertia():
-            """Start momentum if finger lifted."""
-            if time_module.time() - scroll_state["last_time"] > 0.04:
-                if abs(scroll_state["velocity"]) >= MIN_VELOCITY and not scroll_state["animating"]:
-                    scroll_state["animating"] = True
-                    _apply_inertia()
-        
-        def _on_touchpad_scroll(event):
-            """Pure direct tracking - content follows finger exactly."""
-            try:
-                delta_y = event.delta & 0xFFFF
-                if delta_y > 32767:
-                    delta_y -= 65536
-                
-                if abs(delta_y) < 1:
-                    return
-                
-                current_time = time_module.time()
-                time_delta = current_time - scroll_state["last_time"]
-                
-                scroll_state["animating"] = False
-                
-                canvas = scrollable_frame._parent_canvas
-                current = canvas.yview()
-                visible = current[1] - current[0]
-                
-                # Pure 1:1 tracking - no smoothing, no lag
-                scroll_amount = -delta_y * 0.0004
-                
-                new_pos = current[0] + scroll_amount
-                new_pos = max(0.0, min(1.0 - visible, new_pos))
-                canvas.yview_moveto(new_pos)
-                
-                # Velocity = recent scroll amounts (for momentum after release)
-                # Use simple average of last two for smoothness
-                if time_delta > 0 and time_delta < 0.15:
-                    scroll_state["velocity"] = (scroll_state["last_scroll_amount"] + scroll_amount) / 2
-                else:
-                    scroll_state["velocity"] = scroll_amount
-                
-                scroll_state["last_scroll_amount"] = scroll_amount
-                scroll_state["last_time"] = current_time
-                
-                tutorial_window.after(60, _start_inertia)
-            except:
-                pass
-        
-        tutorial_window.bind_all("<TouchpadScroll>", _on_touchpad_scroll)
+        # Set up natural scrolling (cross-platform, physics-based momentum)
+        natural_scroller = setup_natural_scroll(scrollable_frame, tutorial_window)
         
         # Tutorial sections data (icon, title, description)
         tutorial_sections = [
@@ -4280,8 +4093,8 @@ class BrainDockGUI:
         # Clean up bindings
         try:
             tutorial_window.unbind_all("<MouseWheel>")
-        except:
-            pass
+        except Exception:
+            pass  # Ignore errors during cleanup (window may already be destroyed)
         tutorial_window.destroy()
         logger.debug("Tutorial popup closed")
     
@@ -4915,10 +4728,14 @@ class BrainDockGUI:
         # Wait for detection thread(s) to finish and clean up references
         if self.detection_thread and self.detection_thread.is_alive():
             self.detection_thread.join(timeout=2.0)
+            if self.detection_thread.is_alive():
+                logger.warning("Detection thread did not stop within timeout - may be stuck")
         self.detection_thread = None  # Clean up reference for garbage collection
         
         if self.screen_detection_thread and self.screen_detection_thread.is_alive():
             self.screen_detection_thread.join(timeout=2.0)
+            if self.screen_detection_thread.is_alive():
+                logger.warning("Screen detection thread did not stop within timeout - may be stuck")
         self.screen_detection_thread = None  # Clean up reference for garbage collection
         
         # Show mode selector again
@@ -5287,10 +5104,14 @@ class BrainDockGUI:
             # Wait for detection thread(s) to finish and clean up references
             if self.detection_thread and self.detection_thread.is_alive():
                 self.detection_thread.join(timeout=2.0)
+                if self.detection_thread.is_alive():
+                    logger.warning("Detection thread did not stop within timeout - may be stuck")
             self.detection_thread = None  # Clean up reference for garbage collection
             
             if self.screen_detection_thread and self.screen_detection_thread.is_alive():
                 self.screen_detection_thread.join(timeout=2.0)
+                if self.screen_detection_thread.is_alive():
+                    logger.warning("Screen detection thread did not stop within timeout - may be stuck")
             self.screen_detection_thread = None  # Clean up reference for garbage collection
             
             # End session with captured stop time
@@ -5889,10 +5710,14 @@ class BrainDockGUI:
             # Wait for detection thread(s) to finish and clean up references
             if self.detection_thread and self.detection_thread.is_alive():
                 self.detection_thread.join(timeout=2.0)
+                if self.detection_thread.is_alive():
+                    logger.warning("Detection thread did not stop within timeout - may be stuck")
             self.detection_thread = None  # Clean up reference for garbage collection
             
             if self.screen_detection_thread and self.screen_detection_thread.is_alive():
                 self.screen_detection_thread.join(timeout=2.0)
+                if self.screen_detection_thread.is_alive():
+                    logger.warning("Screen detection thread did not stop within timeout - may be stuck")
             self.screen_detection_thread = None  # Clean up reference for garbage collection
             
             # End session and record usage with correct active duration

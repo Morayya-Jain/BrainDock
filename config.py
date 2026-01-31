@@ -29,7 +29,12 @@ def get_base_dir() -> Path:
     """
     if is_bundled():
         # When bundled, _MEIPASS is where PyInstaller extracts files
-        return Path(sys._MEIPASS)
+        # Use getattr for proper typing (sys._MEIPASS is a private attribute)
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            return Path(meipass)
+        # Fallback (shouldn't happen if is_bundled() is True)
+        return Path(__file__).parent
     else:
         # Development mode - directory containing config.py
         return Path(__file__).parent
@@ -53,8 +58,13 @@ def get_user_data_dir() -> Path:
             data_dir = Path.home() / "Library" / "Application Support" / "BrainDock"
         elif sys.platform == 'win32':
             # Windows: %APPDATA%/BrainDock
-            appdata = os.environ.get('APPDATA', Path.home())
-            data_dir = Path(appdata) / "BrainDock"
+            # Use proper fallback if APPDATA is not set (rare but possible)
+            appdata = os.environ.get('APPDATA')
+            if appdata:
+                data_dir = Path(appdata) / "BrainDock"
+            else:
+                # Proper fallback to standard Windows location
+                data_dir = Path.home() / "AppData" / "Roaming" / "BrainDock"
         else:
             # Linux: ~/.local/share/BrainDock
             data_dir = Path.home() / ".local" / "share" / "BrainDock"
@@ -219,8 +229,9 @@ BUNDLED_DATA_DIR = BASE_DIR / "data"
 # Ensure user data directories exist
 try:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-except Exception:
-    pass  # Handle gracefully if directory creation fails
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).error(f"Failed to create data directory {DATA_DIR}: {e}")
 # Downloads folder always exists, no need to create it
 
 # Event types

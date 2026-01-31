@@ -8,11 +8,77 @@ Supports Stripe payments as the activation method.
 import json
 import hashlib
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+
+def _get_machine_id() -> str:
+    """
+    Generate a unique machine identifier for license binding.
+    
+    Uses multiple sources to create a stable identifier that persists
+    across reboots but is unique per machine.
+    
+    Returns:
+        SHA256 hash of combined hardware identifiers (truncated to 32 chars).
+    """
+    identifiers = []
+    
+    # Method 1: Try to get MAC address
+    try:
+        mac = uuid.getnode()
+        # Only use if it's a real MAC (not randomly generated)
+        if (mac >> 40) % 2 == 0:  # Check multicast bit
+            identifiers.append(str(mac))
+    except Exception:
+        pass
+    
+    # Method 2: Platform-specific identifiers
+    import platform
+    import sys
+    
+    try:
+        if sys.platform == "darwin":
+            # macOS: Use hardware UUID
+            import subprocess
+            result = subprocess.run(
+                ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'IOPlatformUUID' in line:
+                        uuid_part = line.split('"')[-2]
+                        identifiers.append(uuid_part)
+                        break
+        elif sys.platform == "win32":
+            # Windows: Use machine GUID from registry
+            import subprocess
+            result = subprocess.run(
+                ["reg", "query", "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'MachineGuid' in line:
+                        parts = line.strip().split()
+                        if len(parts) >= 3:
+                            identifiers.append(parts[-1])
+                        break
+    except Exception:
+        pass
+    
+    # Method 3: Fallback to platform info (less unique but always available)
+    identifiers.append(platform.node())
+    identifiers.append(platform.machine())
+    
+    # Combine all identifiers and hash
+    combined = "|".join(identifiers)
+    return hashlib.sha256(combined.encode()).hexdigest()[:32]
 
 
 class LicenseManager:
@@ -68,6 +134,7 @@ class LicenseManager:
             "stripe_payment_intent": None,
             "activated_at": None,
             "email": None,
+            "machine_id": None,
             "checksum": None
         }
     
@@ -75,34 +142,62 @@ class LicenseManager:
         """
         Calculate checksum for license data integrity.
         
+        Uses full SHA256 hash (not truncated) for security.
+        
         Args:
             data: License data dictionary.
             
         Returns:
-            SHA256 checksum string.
+            Full SHA256 checksum string (64 characters).
         """
         # Create a copy without the checksum field
         data_copy = {k: v for k, v in data.items() if k != "checksum"}
         # Sort keys for consistent hashing
         data_str = json.dumps(data_copy, sort_keys=True)
-        return hashlib.sha256(data_str.encode()).hexdigest()[:16]
+        return hashlib.sha256(data_str.encode()).hexdigest()  # Full hash, not truncated
     
     def _verify_checksum(self, data: Dict[str, Any]) -> bool:
         """
-        Verify the checksum of license data.
+        Verify the checksum and machine binding of license data.
+        
+        Security: Requires checksum to be present. Missing checksum is treated
+        as tampering (prevents bypass by removing checksum field).
+        
+        Also verifies machine binding if present - license won't work on
+        a different machine than it was activated on.
         
         Args:
             data: License data dictionary.
             
         Returns:
-            True if checksum is valid or not present, False if mismatch.
+            True if checksum is valid and machine matches, False otherwise.
         """
         stored_checksum = data.get("checksum")
-        if not stored_checksum:
-            return True  # No checksum = old format, accept it
         
+        # Security: Require checksum for licensed entries
+        # Only allow missing checksum for unlicensed (default) data
+        if not stored_checksum:
+            if data.get("licensed", False):
+                logger.warning("License file missing checksum - possible tampering")
+                return False
+            return True  # Unlicensed data doesn't need checksum
+        
+        # Verify checksum (support both old truncated and new full checksums)
         calculated = self._calculate_checksum(data)
-        return stored_checksum == calculated
+        # Old format used 16-char truncated hash, new format uses full 64-char hash
+        if stored_checksum != calculated and stored_checksum != calculated[:16]:
+            logger.warning("License checksum mismatch - possible tampering")
+            return False
+        
+        # Verify machine binding if present
+        stored_machine_id = data.get("machine_id")
+        if stored_machine_id:
+            current_machine_id = _get_machine_id()
+            if stored_machine_id != current_machine_id:
+                logger.warning("License machine ID mismatch - license may have been copied")
+                return False
+        
+        return True
     
     def _save_data(self) -> None:
         """Save license data to JSON file with checksum."""
@@ -160,6 +255,8 @@ class LicenseManager:
         """
         Activate license after successful Stripe payment.
         
+        Binds the license to the current machine to prevent copying.
+        
         Args:
             session_id: Stripe Checkout session ID.
             payment_intent: Optional Stripe payment intent ID.
@@ -175,10 +272,11 @@ class LicenseManager:
             "stripe_payment_intent": payment_intent,
             "activated_at": datetime.now().isoformat(),
             "email": email,
+            "machine_id": _get_machine_id(),  # Bind to this machine
             "checksum": None
         }
         self._save_data()
-        logger.info(f"License activated via Stripe payment (session: {session_id[:20]}...)")
+        logger.info(f"License activated via Stripe payment (session: {session_id[:20] if session_id else 'unknown'}...)")
         return True
     
     def activate_with_promo(
@@ -189,6 +287,8 @@ class LicenseManager:
     ) -> bool:
         """
         Activate license after successful promo code redemption via Stripe.
+        
+        Binds the license to the current machine to prevent copying.
         
         Args:
             session_id: Stripe Checkout session ID.
@@ -206,10 +306,11 @@ class LicenseManager:
             "promo_code": promo_code,  # Store the promo code used
             "activated_at": datetime.now().isoformat(),
             "email": email,
+            "machine_id": _get_machine_id(),  # Bind to this machine
             "checksum": None
         }
         self._save_data()
-        logger.info(f"License activated via promo code")
+        logger.info("License activated via promo code")
         return True
     
     def revoke_license(self) -> None:
@@ -234,24 +335,31 @@ class LicenseManager:
         return None
 
 
-# Global instance for easy access
+# Global instance for easy access (thread-safe singleton)
 _license_manager_instance: Optional[LicenseManager] = None
+_license_manager_lock = __import__('threading').Lock()
 
 
 def get_license_manager() -> LicenseManager:
     """
     Get the global LicenseManager instance.
     
+    Thread-safe: Uses double-check locking pattern to prevent
+    race conditions during initialization.
+    
     Returns:
         Singleton LicenseManager instance.
     """
     global _license_manager_instance
     if _license_manager_instance is None:
-        # Import config here to avoid circular imports
-        import config
-        _license_manager_instance = LicenseManager(
-            license_file=config.LICENSE_FILE
-        )
+        with _license_manager_lock:
+            # Double-check after acquiring lock
+            if _license_manager_instance is None:
+                # Import config here to avoid circular imports
+                import config
+                _license_manager_instance = LicenseManager(
+                    license_file=config.LICENSE_FILE
+                )
     return _license_manager_instance
 
 

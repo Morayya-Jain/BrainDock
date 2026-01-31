@@ -24,7 +24,7 @@ from typing import Optional
 import config
 from instance_lock import check_single_instance, get_existing_pid
 from camera.capture import CameraCapture
-from camera import create_vision_detector
+from camera import create_vision_detector, get_event_type
 from tracking.session import Session
 from tracking.analytics import compute_statistics
 from reporting.pdf_report import generate_report
@@ -59,21 +59,38 @@ class BrainDock:
         """
         Check if all requirements are met before starting.
         
+        Validates the appropriate API key based on the configured vision provider.
+        
         Returns:
             True if all requirements met, False otherwise
         """
         print("\n🔍 Checking requirements...")
         
-        # Check OpenAI API key - REQUIRED for vision detection
-        if not config.OPENAI_API_KEY:
-            print("\n❌ ERROR: OpenAI API key is REQUIRED!")
-            print("   This app now uses OpenAI Vision API for detection.")
-            print("   Please set OPENAI_API_KEY in your .env file.")
-            print("\n   Get your API key from: https://platform.openai.com/api-keys")
-            return False
+        # Check the appropriate API key based on vision provider
+        vision_provider = config.VISION_PROVIDER.lower()
+        
+        if vision_provider == "gemini":
+            # Gemini is the default provider for bundled builds
+            if not config.GEMINI_API_KEY:
+                print("\n❌ ERROR: Gemini API key is REQUIRED!")
+                print("   This app uses Gemini Vision API for detection.")
+                print("   Please set GEMINI_API_KEY in your .env file.")
+                print("\n   Get your API key from: https://aistudio.google.com/app/apikey")
+                return False
+            else:
+                print("✓ Gemini API key found")
+                print(f"✓ Using vision model: {config.GEMINI_VISION_MODEL}")
         else:
-            print("✓ OpenAI API key found")
-            print(f"✓ Using vision model: {config.OPENAI_VISION_MODEL}")
+            # OpenAI provider (explicit or fallback)
+            if not config.OPENAI_API_KEY:
+                print("\n❌ ERROR: OpenAI API key is REQUIRED!")
+                print("   This app uses OpenAI Vision API for detection.")
+                print("   Please set OPENAI_API_KEY in your .env file.")
+                print("\n   Get your API key from: https://platform.openai.com/api-keys")
+                return False
+            else:
+                print("✓ OpenAI API key found")
+                print(f"✓ Using vision model: {config.OPENAI_VISION_MODEL}")
         
         # Check camera availability
         print("✓ Camera access ready")
@@ -164,7 +181,6 @@ class BrainDock:
                         detection_state = detector.get_detection_state(frame)
                         
                         # Determine event type from detection
-                        from camera import get_event_type
                         event_type = get_event_type(detection_state)
                         
                         # Log event if state changed

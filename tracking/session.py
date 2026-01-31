@@ -109,7 +109,8 @@ class Session:
             previous_state = self.current_state
             
             if self.current_state and self.state_start_time:
-                self._finalize_current_state()
+                # Pass the timestamp to ensure continuous timeline (no gaps)
+                self._finalize_current_state(timestamp)
             
             # Start new state
             self.current_state = event_type

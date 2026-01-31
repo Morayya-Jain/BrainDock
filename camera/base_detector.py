@@ -109,11 +109,18 @@ def parse_detection_response(content: str) -> Dict[str, Any]:
     result = json.loads(json_str)
     
     # Normalize and validate result
+    # Handle gadget_confidence type safely - API might return string like "high"
+    try:
+        gadget_confidence = float(result.get("gadget_confidence", 0.0))
+    except (ValueError, TypeError):
+        gadget_confidence = 0.0
+        logger.warning(f"Invalid gadget_confidence value: {result.get('gadget_confidence')}, defaulting to 0.0")
+    
     return {
         "person_present": result.get("person_present", False),
         "at_desk": result.get("at_desk", True),  # Default True for backward compat
         "gadget_visible": result.get("gadget_visible", False),
-        "gadget_confidence": float(result.get("gadget_confidence", 0.0)),
+        "gadget_confidence": gadget_confidence,
         "distraction_type": result.get("distraction_type", "none")
     }
 

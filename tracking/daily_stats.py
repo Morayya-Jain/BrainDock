@@ -82,7 +82,7 @@ class DailyStatsTracker:
             with open(self.data_file, 'w') as f:
                 json.dump(self.data, f, indent=2)
             logger.debug(f"Saved daily stats: {self.data}")
-        except IOError as e:
+        except (IOError, OSError, PermissionError) as e:
             logger.error(f"Failed to save daily stats: {e}")
     
     def _check_and_reset_if_new_day(self) -> None:
@@ -179,18 +179,25 @@ class DailyStatsTracker:
         return (focus / total_active) * 100.0
 
 
-# Global instance for easy access
+# Global instance for easy access (thread-safe singleton)
 _daily_stats_instance: Optional[DailyStatsTracker] = None
+_daily_stats_lock = __import__('threading').Lock()
 
 
 def get_daily_stats_tracker() -> DailyStatsTracker:
     """
     Get the global DailyStatsTracker instance.
     
+    Thread-safe: Uses double-check locking pattern to prevent
+    race conditions during initialization.
+    
     Returns:
         Singleton DailyStatsTracker instance.
     """
     global _daily_stats_instance
     if _daily_stats_instance is None:
-        _daily_stats_instance = DailyStatsTracker()
+        with _daily_stats_lock:
+            # Double-check after acquiring lock
+            if _daily_stats_instance is None:
+                _daily_stats_instance = DailyStatsTracker()
     return _daily_stats_instance

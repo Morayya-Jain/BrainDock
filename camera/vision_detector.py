@@ -6,13 +6,15 @@ import base64
 import logging
 from typing import Dict, Optional, Any
 
+import openai
 from openai import OpenAI
 
 import config
 from camera.base_detector import (
     get_safe_default_result,
     parse_detection_response,
-    DetectionCache
+    DetectionCache,
+    retry_with_backoff
 )
 
 logger = logging.getLogger(__name__)
@@ -187,35 +189,50 @@ RULES:
             # Encode frame
             base64_image = self._encode_frame(frame)
             
-            # Call OpenAI Vision API with system message for prompt caching
-            # System message is cached by OpenAI, reducing costs on subsequent calls
-            response = self.client.chat.completions.create(
-                model=self.vision_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": self.system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Analyze this frame:"
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}",
-                                    "detail": "low"  # Use low detail to save tokens
+            # Define the API call function for retry logic
+            def make_api_call():
+                return self.client.chat.completions.create(
+                    model=self.vision_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": self.system_prompt
+                        },
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Analyze this frame:"
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}",
+                                        "detail": "low"  # Use low detail to save tokens
+                                    }
                                 }
-                            }
-                        ]
-                    }
-                ],
-                max_tokens=100,  # Minimal buffer - actual response is ~60 tokens
-                temperature=0.3,  # Lower temp for more consistent detection
-                timeout=30.0  # Prevent indefinite hangs on network issues
+                            ]
+                        }
+                    ],
+                    max_tokens=100,  # Minimal buffer - actual response is ~60 tokens
+                    temperature=0.3,  # Lower temp for more consistent detection
+                    timeout=30.0  # Prevent indefinite hangs on network issues
+                )
+            
+            # Call OpenAI Vision API with retry for transient errors
+            # Matches Gemini detector behavior for consistency
+            response = retry_with_backoff(
+                make_api_call,
+                max_retries=2,
+                initial_delay=1.0,
+                retryable_exceptions=(
+                    openai.APIConnectionError,
+                    openai.APITimeoutError,
+                    openai.RateLimitError,
+                    ConnectionError,
+                    TimeoutError,
+                )
             )
             
             # Extract response content
@@ -244,8 +261,18 @@ RULES:
             
             return detection_result
             
-        except TimeoutError as e:
+        except openai.APITimeoutError as e:
             logger.warning(f"OpenAI Vision API timeout: {e}")
+            return get_safe_default_result()
+        except openai.AuthenticationError as e:
+            # Authentication errors are not transient - log at ERROR level
+            logger.error(f"OpenAI API authentication error - check API key: {e}")
+            return get_safe_default_result()
+        except openai.APIConnectionError as e:
+            logger.warning(f"OpenAI API connection error: {e}")
+            return get_safe_default_result()
+        except openai.RateLimitError as e:
+            logger.warning(f"OpenAI API rate limit reached: {e}")
             return get_safe_default_result()
         except Exception as e:
             logger.error(f"Vision API error: {e}")

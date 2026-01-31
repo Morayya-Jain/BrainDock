@@ -161,7 +161,11 @@ def consolidate_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         else:
             # Save previous event if exists
             if current_event:
-                consolidated.append(_format_event(current_event))
+                try:
+                    consolidated.append(_format_event(current_event))
+                except ValueError as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Skipping malformed event: {e}")
             
             # Start new event
             current_event = {
@@ -173,7 +177,11 @@ def consolidate_events(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     
     # Don't forget the last event
     if current_event:
-        consolidated.append(_format_event(current_event))
+        try:
+            consolidated.append(_format_event(current_event))
+        except ValueError as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Skipping malformed event during consolidation: {e}")
     
     return consolidated
 
@@ -189,9 +197,20 @@ def _format_event(event: Dict[str, Any]) -> Dict[str, Any]:
         
     Returns:
         Formatted event dictionary with duration_seconds as float
+        
+    Raises:
+        ValueError: If date strings are malformed (logged and re-raised)
     """
-    start = datetime.fromisoformat(event["start"])
-    end = datetime.fromisoformat(event["end"])
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        start = datetime.fromisoformat(event["start"])
+        end = datetime.fromisoformat(event["end"])
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Malformed date in event: start={event.get('start')}, end={event.get('end')}, error={e}")
+        raise ValueError(f"Malformed date in event: {e}") from e
+    
     # Keep full float precision
     duration_seconds = float(event["duration_seconds"])
     

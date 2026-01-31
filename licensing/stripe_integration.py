@@ -21,23 +21,82 @@ _CERT_PATH = None
 # Debug logging is disabled in production builds
 # Set BRAINDOCK_DEBUG=1 environment variable to enable debug logging
 _DEBUG_ENABLED = os.environ.get("BRAINDOCK_DEBUG", "").lower() in ("1", "true", "yes")
-_DEBUG_LOG_PATH = os.path.expanduser("~/Desktop/braindock_debug.log") if _DEBUG_ENABLED else None
+
+def _get_secure_debug_log_path() -> Optional[str]:
+    """
+    Get a secure path for debug logs with restricted permissions.
+    
+    Uses system temp directory instead of Desktop to avoid exposing
+    sensitive data in a publicly visible location.
+    
+    Returns:
+        Path to debug log file, or None if debug is disabled.
+    """
+    if not _DEBUG_ENABLED:
+        return None
+    
+    import tempfile
+    import stat
+    
+    # Use system temp directory (more secure than Desktop)
+    temp_dir = tempfile.gettempdir()
+    log_path = os.path.join(temp_dir, "braindock_debug.log")
+    
+    # Try to set restrictive permissions on the log file
+    try:
+        if os.path.exists(log_path):
+            # Set file permissions to owner read/write only (600)
+            os.chmod(log_path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass  # Best effort - may fail on some systems
+    
+    return log_path
+
+_DEBUG_LOG_PATH = _get_secure_debug_log_path()
 
 def _debug_log(hypothesis_id: str, location: str, message: str, data: dict):
-    """Write debug log entry to file (only if debug mode enabled)."""
+    """
+    Write debug log entry to file (only if debug mode enabled).
+    
+    Security: Logs are written to a temp file with restricted permissions.
+    Sensitive data (API keys, session IDs) is redacted before logging.
+    """
     if not _DEBUG_ENABLED or not _DEBUG_LOG_PATH:
         return  # Debug logging disabled in production
     
-    # #region agent log
     import json
     import time
+    import stat
+    
+    # Redact sensitive data before logging
+    safe_data = {}
+    sensitive_keys = {'api_key', 'secret_key', 'session_id', 'payment_intent', 'password', 'token'}
+    for key, value in data.items():
+        key_lower = key.lower()
+        if any(sensitive in key_lower for sensitive in sensitive_keys):
+            safe_data[key] = '***REDACTED***' if value else None
+        elif isinstance(value, str) and len(value) > 50:
+            # Truncate long values that might contain sensitive info
+            safe_data[key] = value[:20] + '...' + value[-10:] if len(value) > 30 else value
+        else:
+            safe_data[key] = value
+    
     try:
-        entry = {"hypothesisId": hypothesis_id, "location": location, "message": message, "data": data, "timestamp": int(time.time() * 1000), "sessionId": "debug-session"}
-        with open(_DEBUG_LOG_PATH, "a") as f:
+        entry = {
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": safe_data,
+            "timestamp": int(time.time() * 1000),
+            "sessionId": "debug-session"
+        }
+        
+        # Open file with restrictive permissions
+        fd = os.open(_DEBUG_LOG_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(fd, 'a') as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:
-        pass
-    # #endregion
+        pass  # Fail silently - debug logging should never crash the app
 
 # Fix SSL certificates for bundled apps (PyInstaller)
 # This must be done BEFORE importing stripe/httpx
@@ -280,6 +339,9 @@ class StripeIntegration:
         
         if STRIPE_AVAILABLE and secret_key:
             stripe.api_key = secret_key
+            # Configure network settings to prevent indefinite hangs
+            stripe.max_network_retries = 2  # Retry on network errors
+            stripe.default_http_client = None  # Use default with sensible timeout
             self._initialized = True
             logger.debug("Stripe integration initialized")
         elif not STRIPE_AVAILABLE:
@@ -533,7 +595,9 @@ class StripeIntegration:
         if sys.platform == "darwin":
             try:
                 # AppleScript command to open URL in default browser
-                script = f'open location "{checkout_url}"'
+                # Escape special characters to prevent AppleScript injection
+                safe_url = checkout_url.replace('\\', '\\\\').replace('"', '\\"')
+                script = f'open location "{safe_url}"'
                 result = subprocess.run(
                     ["/usr/bin/osascript", "-e", script],
                     capture_output=True,

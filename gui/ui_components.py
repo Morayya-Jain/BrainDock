@@ -47,7 +47,7 @@ FONT_BOUNDS = {
     "title": (24, 16, 32),      # Base 24pt, min 16, max 32
     "status": (18, 14, 24),     # Base 18pt, min 14, max 24 (reduced from 24)
     "body": (14, 11, 18),       # Base 14pt, min 11, max 18
-    "button": (14, 11, 18),     # Base 14pt, min 11, max 18
+    "button": (12, 10, 15),     # Base 12pt, min 10, max 15 (reduced for better fit)
     "small": (12, 10, 16),      # Base 12pt, min 10, max 16
     "badge": (10, 9, 14),       # Base 10pt, min 9, max 14 (reduced from 12)
     "caption": (11, 9, 14),     # Base 11pt, min 9, max 14 (reduced from 12)
@@ -679,3 +679,348 @@ class StyledEntry(ctk.CTkFrame):
 
 # Backward compatibility aliases
 normalize_tk_scaling = lambda root: None  # No-op, CTk handles this
+
+
+# --- Natural Scroll System ---
+
+import time as time_module
+from collections import deque
+
+
+class NaturalScroller:
+    """
+    Cross-platform natural scrolling with physics-based momentum.
+    
+    Provides smooth, finger-following scroll behavior that works consistently
+    across macOS and Windows, with trackpad, mouse wheel, and scrollbar.
+    """
+    
+    # Physics constants (tuned for natural feel)
+    BASE_SENSITIVITY = 0.0005  # Base finger-to-content ratio
+    MIN_VELOCITY = 0.0002      # Threshold to stop momentum
+    TARGET_FRAME_INTERVAL = 8  # Target ~120fps (ms), will adapt if device can't keep up
+    MAX_FRAME_INTERVAL = 16    # Fallback to ~60fps for slower devices
+    VELOCITY_SAMPLES = 5       # Number of samples for velocity averaging
+    INERTIA_DELAY = 50         # Delay before starting inertia (ms)
+    
+    # Friction values for different frame rates (to maintain consistent feel)
+    # Higher FPS needs higher friction per frame to achieve same momentum duration
+    FRICTION_120FPS = (0.96, 0.99)  # (base, max) for 120fps
+    FRICTION_60FPS = (0.92, 0.98)   # (base, max) for 60fps
+    
+    def __init__(self, scrollable_frame: ctk.CTkScrollableFrame, window):
+        """
+        Initialize the natural scroller.
+        
+        Args:
+            scrollable_frame: The CTkScrollableFrame to add natural scrolling to.
+            window: The parent window (for scheduling animations).
+        """
+        self.scrollable_frame = scrollable_frame
+        self.window = window
+        self._destroyed = False
+        
+        # Scroll state
+        self._velocity = 0.0
+        self._last_time = 0.0
+        self._animating = False
+        self._target_pos = None
+        self._current_pos = None
+        
+        # Adaptive frame rate tracking
+        self._frame_interval = self.TARGET_FRAME_INTERVAL
+        self._last_frame_time = 0.0
+        self._slow_frame_count = 0
+        self._base_friction, self._max_friction = self.FRICTION_120FPS
+        
+        # Velocity tracking with weighted moving average
+        self._velocity_samples: deque = deque(maxlen=self.VELOCITY_SAMPLES)
+        self._weights = [1, 2, 3, 4, 5]  # Recent samples weighted more heavily
+        
+        # Bind scroll events
+        self._bind_scroll_events()
+        
+        # Track window destruction
+        self.window.bind("<Destroy>", self._on_destroy, add="+")
+    
+    def _on_destroy(self, event):
+        """Handle window destruction to prevent errors."""
+        if event.widget == self.window:
+            self._destroyed = True
+            self._animating = False
+    
+    def _bind_scroll_events(self):
+        """Bind all scroll events for cross-platform support."""
+        # macOS Tk 9+ touchpad scroll
+        self.window.bind_all("<TouchpadScroll>", self._on_scroll)
+        # macOS/Windows mouse wheel
+        self.window.bind_all("<MouseWheel>", self._on_scroll)
+        # Linux scroll buttons (Button-4 = up, Button-5 = down)
+        self.window.bind_all("<Button-4>", self._on_linux_scroll_up)
+        self.window.bind_all("<Button-5>", self._on_linux_scroll_down)
+    
+    def unbind_scroll_events(self):
+        """Unbind all scroll events (call when closing window)."""
+        try:
+            self.window.unbind_all("<TouchpadScroll>")
+            self.window.unbind_all("<MouseWheel>")
+            self.window.unbind_all("<Button-4>")
+            self.window.unbind_all("<Button-5>")
+        except Exception:
+            pass  # Window may already be destroyed
+    
+    def _normalize_delta(self, event) -> float:
+        """
+        Normalize scroll delta across platforms and devices.
+        
+        Args:
+            event: The scroll event.
+        
+        Returns:
+            Normalized delta value (positive = scroll down, negative = scroll up).
+        """
+        if not hasattr(event, 'delta'):
+            return 0.0
+        
+        delta = event.delta
+        
+        if sys.platform == 'win32':
+            # Windows: delta is typically 120 per notch
+            # Normalize to reasonable scroll amount
+            return -delta / 120 * 15
+        else:
+            # macOS: handle signed 16-bit delta for touchpad
+            delta_y = delta & 0xFFFF
+            if delta_y > 32767:
+                delta_y -= 65536
+            return delta_y
+    
+    def _get_adaptive_sensitivity(self, delta: float) -> float:
+        """
+        Calculate adaptive sensitivity based on scroll speed.
+        
+        Fast scrolls get slightly lower sensitivity (more control).
+        Slow precise scrolls get slightly higher sensitivity (better tracking).
+        
+        Args:
+            delta: The scroll delta.
+        
+        Returns:
+            Adjusted sensitivity multiplier.
+        """
+        speed_factor = min(1.0, abs(delta) / 100)
+        adaptive_factor = 1.0 - (0.12 * speed_factor)
+        return self.BASE_SENSITIVITY * adaptive_factor
+    
+    def _get_adaptive_friction(self, velocity: float) -> float:
+        """
+        Calculate adaptive friction based on current velocity and frame rate.
+        
+        Faster scrolls coast longer (higher friction = less deceleration).
+        Slower scrolls stop quicker (lower friction = more deceleration).
+        Friction values automatically adjust based on detected frame rate.
+        
+        Args:
+            velocity: Current scroll velocity.
+        
+        Returns:
+            Friction factor adjusted for current frame rate.
+        """
+        velocity_factor = min(1.0, abs(velocity) / 0.01)
+        return self._base_friction + ((self._max_friction - self._base_friction) * velocity_factor)
+    
+    def _calculate_weighted_velocity(self) -> float:
+        """
+        Calculate velocity using weighted moving average of recent samples.
+        
+        Returns:
+            Weighted average velocity.
+        """
+        if not self._velocity_samples:
+            return 0.0
+        
+        samples = list(self._velocity_samples)
+        weights = self._weights[:len(samples)]
+        
+        weighted_sum = sum(s * w for s, w in zip(samples, weights))
+        weight_total = sum(weights)
+        
+        return weighted_sum / weight_total if weight_total > 0 else 0.0
+    
+    def _on_scroll(self, event):
+        """Handle scroll events from trackpad or mouse wheel."""
+        if self._destroyed:
+            return
+        
+        try:
+            delta = self._normalize_delta(event)
+            
+            if abs(delta) < 1:
+                return
+            
+            current_time = time_module.time()
+            time_delta = current_time - self._last_time
+            
+            # Stop any ongoing momentum animation
+            self._animating = False
+            
+            # Get canvas and current position
+            canvas = self.scrollable_frame._parent_canvas
+            current = canvas.yview()
+            visible = current[1] - current[0]
+            
+            # Calculate scroll amount with adaptive sensitivity
+            sensitivity = self._get_adaptive_sensitivity(delta)
+            scroll_amount = -delta * sensitivity
+            
+            # Calculate new position with bounds
+            new_pos = current[0] + scroll_amount
+            new_pos = max(0.0, min(1.0 - visible, new_pos))
+            
+            # Apply scroll immediately (direct finger tracking)
+            canvas.yview_moveto(new_pos)
+            
+            # Track velocity for momentum
+            if time_delta > 0 and time_delta < 0.15:
+                self._velocity_samples.append(scroll_amount)
+            else:
+                self._velocity_samples.clear()
+                self._velocity_samples.append(scroll_amount)
+            
+            self._last_time = current_time
+            
+            # Schedule inertia check after brief delay
+            self.window.after(self.INERTIA_DELAY, self._start_inertia)
+            
+        except Exception:
+            pass  # Silently handle any errors
+    
+    def _on_linux_scroll_up(self, event):
+        """Handle Linux scroll up (Button-4)."""
+        if self._destroyed:
+            return
+        self._apply_discrete_scroll(-3)
+    
+    def _on_linux_scroll_down(self, event):
+        """Handle Linux scroll down (Button-5)."""
+        if self._destroyed:
+            return
+        self._apply_discrete_scroll(3)
+    
+    def _apply_discrete_scroll(self, units: int):
+        """
+        Apply discrete scroll (for Linux or line-based scrolling).
+        
+        Args:
+            units: Number of units to scroll (positive = down).
+        """
+        try:
+            canvas = self.scrollable_frame._parent_canvas
+            current = canvas.yview()
+            visible = current[1] - current[0]
+            
+            scroll_amount = units * self.BASE_SENSITIVITY * 20
+            new_pos = current[0] + scroll_amount
+            new_pos = max(0.0, min(1.0 - visible, new_pos))
+            
+            canvas.yview_moveto(new_pos)
+        except Exception:
+            pass
+    
+    def _start_inertia(self):
+        """Start momentum animation if finger has lifted."""
+        if self._destroyed:
+            return
+        
+        # Only start if no recent input
+        if time_module.time() - self._last_time > 0.04:
+            velocity = self._calculate_weighted_velocity()
+            if abs(velocity) >= self.MIN_VELOCITY and not self._animating:
+                self._velocity = velocity
+                self._animating = True
+                self._last_frame_time = time_module.time()
+                self._slow_frame_count = 0
+                self._apply_inertia()
+    
+    def _adapt_frame_rate(self, actual_frame_time_ms: float):
+        """
+        Adapt frame rate if device can't keep up with target FPS.
+        
+        Args:
+            actual_frame_time_ms: How long the last frame actually took (ms).
+        """
+        # If frames are consistently taking longer than target, fall back to 60fps
+        if actual_frame_time_ms > self._frame_interval * 1.5:
+            self._slow_frame_count += 1
+            if self._slow_frame_count >= 3:
+                # Switch to 60fps mode
+                self._frame_interval = self.MAX_FRAME_INTERVAL
+                self._base_friction, self._max_friction = self.FRICTION_60FPS
+        else:
+            # Reset slow frame counter if we're keeping up
+            self._slow_frame_count = max(0, self._slow_frame_count - 1)
+    
+    def _apply_inertia(self):
+        """Apply momentum animation frame with adaptive frame rate."""
+        if self._destroyed or not self._animating:
+            return
+        
+        current_frame_time = time_module.time()
+        
+        # Stop if velocity too low
+        if abs(self._velocity) < self.MIN_VELOCITY:
+            self._velocity = 0.0
+            self._animating = False
+            return
+        
+        # Stop if new input detected
+        if current_frame_time - self._last_time < 0.04:
+            self._animating = False
+            return
+        
+        try:
+            # Measure actual frame time and adapt if needed
+            if self._last_frame_time > 0:
+                actual_frame_ms = (current_frame_time - self._last_frame_time) * 1000
+                self._adapt_frame_rate(actual_frame_ms)
+            self._last_frame_time = current_frame_time
+            
+            canvas = self.scrollable_frame._parent_canvas
+            current = canvas.yview()
+            visible = current[1] - current[0]
+            
+            # Stop at boundaries
+            if (self._velocity > 0 and current[1] >= 1.0) or \
+               (self._velocity < 0 and current[0] <= 0.0):
+                self._velocity = 0.0
+                self._animating = False
+                return
+            
+            # Apply velocity
+            new_pos = current[0] + self._velocity
+            new_pos = max(0.0, min(1.0 - visible, new_pos))
+            canvas.yview_moveto(new_pos)
+            
+            # Apply adaptive friction (adjusted for current frame rate)
+            friction = self._get_adaptive_friction(self._velocity)
+            self._velocity *= friction
+            
+            # Schedule next frame at current (possibly adapted) interval
+            self.window.after(self._frame_interval, self._apply_inertia)
+            
+        except Exception:
+            self._animating = False
+
+
+def setup_natural_scroll(scrollable_frame: ctk.CTkScrollableFrame, window) -> NaturalScroller:
+    """
+    Convenience function to set up natural scrolling on a CTkScrollableFrame.
+    
+    Args:
+        scrollable_frame: The scrollable frame to enhance.
+        window: The parent window.
+    
+    Returns:
+        NaturalScroller instance (keep reference to prevent garbage collection).
+    """
+    return NaturalScroller(scrollable_frame, window)

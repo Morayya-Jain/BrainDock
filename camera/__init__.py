@@ -34,10 +34,15 @@ def create_vision_detector() -> "VisionDetectorProtocol":
         from camera.gemini_detector import GeminiVisionDetector
         logger.info("Using Gemini vision provider")
         return GeminiVisionDetector()
-    else:
-        # Default to OpenAI
+    elif provider == "openai":
         from camera.vision_detector import VisionDetector
         logger.info("Using OpenAI vision provider")
+        return VisionDetector()
+    else:
+        # Unknown provider - log warning and fallback to OpenAI
+        from camera.vision_detector import VisionDetector
+        logger.warning(f"Unknown vision provider '{provider}', defaulting to OpenAI. "
+                      f"Supported providers: 'openai', 'gemini'")
         return VisionDetector()
 
 

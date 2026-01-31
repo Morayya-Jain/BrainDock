@@ -201,7 +201,7 @@ QUICK_SITES = {
     "netflix": {"name": "netflix.com", "patterns": ["netflix.com"]},
     "reddit": {"name": "reddit.com", "patterns": ["reddit.com"]},
     "tiktok": {"name": "tiktok.com", "patterns": ["tiktok.com"]},
-    "twitter": {"name": "twitter.com / x.com", "patterns": ["twitter.com", "x.com"]},
+    "twitter": {"name": "twitter.com / x.com", "patterns": ["twitter.com", "://x.com", "/x.com/"]},
 }
 
 
@@ -631,7 +631,10 @@ class BlocklistManager:
     
     def save(self, blocklist: Optional[Blocklist] = None) -> bool:
         """
-        Save blocklist to file.
+        Save blocklist to file atomically.
+        
+        Uses atomic write (write to temp file, then rename) to prevent
+        data corruption if the app crashes during save.
         
         Args:
             blocklist: Blocklist to save (uses cached if None)
@@ -639,6 +642,9 @@ class BlocklistManager:
         Returns:
             True if saved successfully, False otherwise
         """
+        import tempfile
+        import os
+        
         if blocklist is not None:
             self._blocklist = blocklist
         
@@ -650,11 +656,37 @@ class BlocklistManager:
             # Ensure parent directory exists
             self.settings_path.parent.mkdir(parents=True, exist_ok=True)
             
-            with open(self.settings_path, "w") as f:
-                json.dump(self._blocklist.to_dict(), f, indent=2)
+            # Write to a temp file in the same directory first (for atomic rename)
+            temp_fd, temp_path = tempfile.mkstemp(
+                suffix='.tmp',
+                prefix='blocklist_',
+                dir=self.settings_path.parent
+            )
             
-            logger.info(f"Saved blocklist to {self.settings_path}")
-            return True
+            try:
+                with os.fdopen(temp_fd, 'w') as f:
+                    json.dump(self._blocklist.to_dict(), f, indent=2)
+                
+                # Atomic rename (on POSIX systems)
+                # On Windows, this may fail if target exists, so we handle that
+                try:
+                    os.replace(temp_path, self.settings_path)
+                except OSError:
+                    # Fallback for systems where replace doesn't work
+                    if self.settings_path.exists():
+                        self.settings_path.unlink()
+                    os.rename(temp_path, self.settings_path)
+                
+                logger.info(f"Saved blocklist to {self.settings_path}")
+                return True
+                
+            except Exception:
+                # Clean up temp file on error
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+                raise
             
         except Exception as e:
             logger.error(f"Failed to save blocklist: {e}")

@@ -65,7 +65,7 @@ class UsageLimiter:
             with open(self.data_file, 'w') as f:
                 json.dump(self.data, f, indent=2)
             logger.debug(f"Saved usage data: {self.data}")
-        except IOError as e:
+        except (IOError, OSError, PermissionError) as e:
             logger.error(f"Failed to save usage data: {e}")
     
     def get_remaining_seconds(self) -> int:
@@ -217,18 +217,25 @@ class UsageLimiter:
         return summary
 
 
-# Global instance for easy access
+# Global instance for easy access (thread-safe singleton)
 _limiter_instance: Optional[UsageLimiter] = None
+_limiter_lock = __import__('threading').Lock()
 
 
 def get_usage_limiter() -> UsageLimiter:
     """
     Get the global UsageLimiter instance.
     
+    Thread-safe: Uses double-check locking pattern to prevent
+    race conditions during initialization.
+    
     Returns:
         Singleton UsageLimiter instance.
     """
     global _limiter_instance
     if _limiter_instance is None:
-        _limiter_instance = UsageLimiter()
+        with _limiter_lock:
+            # Double-check after acquiring lock
+            if _limiter_instance is None:
+                _limiter_instance = UsageLimiter()
     return _limiter_instance

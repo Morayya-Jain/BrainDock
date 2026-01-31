@@ -248,7 +248,7 @@ class InstanceLock:
             return False
             
         except Exception as e:
-            logger.warning(f"Error acquiring instance lock: {e}")
+            logger.error(f"Error acquiring instance lock: {e}")
             # Clean up any partially-opened lock handle on error
             if self._lock_handle is not None:
                 try:
@@ -256,9 +256,11 @@ class InstanceLock:
                 except Exception:
                     pass
                 self._lock_handle = None
-            # On unexpected error, allow the app to run (fail-open for robustness)
-            # This ensures the app doesn't break due to permission issues, etc.
-            return True
+            # On unexpected error, return False (fail-closed for safety)
+            # This prevents multiple instances if lock mechanism has issues
+            # User can still run the app by deleting the lock file manually if needed
+            logger.warning("Instance lock failed - returning False to prevent potential multiple instances")
+            return False
     
     def release(self):
         """

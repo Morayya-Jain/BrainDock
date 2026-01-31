@@ -892,8 +892,16 @@ def generate_report(
     
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Sanitize session_id to prevent path traversal attacks
+    # Remove any directory components and keep only the filename-safe part
+    safe_session_id = Path(session_id).name  # Strips directory components
+    # Also remove any potentially dangerous characters
+    safe_session_id = "".join(c for c in safe_session_id if c.isalnum() or c in '-_')
+    if not safe_session_id:
+        safe_session_id = "session"  # Fallback if session_id was entirely invalid
+    
     # Generate filename
-    filename = f"{session_id}.pdf"
+    filename = f"{safe_session_id}.pdf"
     filepath = output_dir / filename
     
     # Create PDF document with custom template
